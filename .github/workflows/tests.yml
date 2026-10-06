@@ -1,0 +1,83 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - master
+      - '*.x'
+  pull_request:
+  schedule:
+    - cron: '0 0 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: true
+      matrix:
+        php: [8.2, 8.3, 8.4]
+
+    name: PHP ${{ matrix.php }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: dom, curl, libxml, mbstring, zip, pcntl, pdo, sqlite, pdo_sqlite
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Copy environment file
+        run: cp .env.example .env
+
+      - name: Generate app key
+        run: php artisan key:generate
+
+      - name: Execute tests
+        run: php artisan test
+
+  postgresql:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: tracker_migration_test
+          POSTGRES_USER: tracker_test
+          POSTGRES_PASSWORD: test-only-password
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U tracker_test -d tracker_migration_test"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DB_CONNECTION: pgsql
+      DB_DATABASE: tracker_migration_test
+      DB_USERNAME: tracker_test
+      DB_PASSWORD: test-only-password
+      DB_PORT: 5432
+    steps:
+      - uses: actions/checkout@v6
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_pgsql, mbstring, dom, zip
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction --no-progress
+      - run: cp .env.example .env && php artisan key:generate
+      - name: Install PostgreSQL 18 client
+        run: |
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-18
+      - run: php vendor/phpunit/phpunit/phpunit -c phpunit.pgsql.xml
+        env:
+          PG_DUMP_BINARY: /usr/lib/postgresql/18/bin/pg_dump

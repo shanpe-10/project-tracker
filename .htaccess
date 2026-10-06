@@ -1,0 +1,6 @@
+# The Laravel application is served only through public/.
+Options -Indexes
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(?!public(?:/|$)). - [F,L]
+</IfModule>

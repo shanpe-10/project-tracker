@@ -1,0 +1,23 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');const vm=require('node:vm');const path=require('node:path');
+const root=path.resolve(__dirname,'..');
+(async()=>{
+ const ctx=vm.createContext({console:{error(){}},setTimeout,clearTimeout,URLSearchParams,Event:class{},fetch:async(url,options)=>{ctx.options=options;return {ok:true,status:200,json:async()=>({ok:true})}}});ctx.window=ctx;ctx.document={addEventListener(){},getElementById(){return null}};
+ vm.runInContext(fs.readFileSync(path.join(root,'public/js/db.js'),'utf8'),ctx);
+ await ctx.apiClient.request('/fake',{headers:{'X-Custom':'value'}});assert.equal(ctx.options.headers['Content-Type'],'application/json');assert.equal(ctx.options.headers['X-Custom'],'value');
+ ctx.seed={projects:[{id:1,title:'Original',nested:{value:'keep'}}],history:[{id:3,projectId:1}]};vm.runInContext('window.db=createServerDatabase(seed)',ctx);
+ await new Promise((resolve,reject)=>{const tx=ctx.db.transaction();tx.objectStore('projects').get(1).onsuccess=e=>{e.target.result.title='Unsaved';e.target.result.nested.value='Changed'};tx.oncomplete=resolve;tx.onerror=reject;});
+ await new Promise((resolve,reject)=>{const tx=ctx.db.transaction();tx.objectStore('projects').get(1).onsuccess=e=>{assert.equal(e.target.result.title,'Original');assert.equal(e.target.result.nested.value,'keep')};tx.oncomplete=resolve;tx.onerror=reject;});
+ let hits=0;await new Promise((resolve,reject)=>{const tx=ctx.db.transaction();tx.objectStore('history').index('projectId').openCursor({lower:1}).onsuccess=e=>{if(e.target.result){hits++;e.target.result.continue()}};tx.oncomplete=resolve;tx.onerror=reject});assert.equal(hits,1);
+ const values={loginUsername:{value:'test'},loginPassword:{value:'longpassword'},loginError:{textContent:''}};
+ const button={disabled:false};const event={preventDefault(){},currentTarget:{querySelector(){return button}}};
+ const a=vm.createContext({console,setTimeout,clearTimeout,document:{addEventListener(){},getElementById(id){return values[id]}},URL,Date});a.window=a;vm.runInContext(fs.readFileSync(path.join(root,'public/js/auth.js'),'utf8'),a);
+ let notice='',initialized=0;a.showLogin=message=>notice=message;a.authRequest=async()=>({ok:false,message:'Rejected'});await a.signIn(event);assert.equal(notice,'Rejected');assert.equal(button.disabled,false);
+ a.authRequest=async()=>({ok:true,user:{role:'staff'},csrfToken:'test-token'});a.applyAuthenticatedUser=(user,token)=>{assert.equal(user.role,'staff');assert.equal(token,'test-token')};a.initializeDatabase=async()=>initialized++;await a.signIn(event);assert.equal(initialized,1);assert.equal(button.disabled,false);
+ const src=fs.readFileSync(path.join(root,'public/js/projects.js'),'utf8');let adds=0,tx;
+ const save=vm.createContext({Date,canCreateProjects:()=>true,showSystemNotification(){},resetFormAccess(){},loadDocuments(){},switchWorkspace(){},db:{transaction(){tx={objectStore(){return {add(){adds++}}}};return tx}}});
+ vm.runInContext('let projectSaveInProgress=false;'+src.slice(src.indexOf('function addDocument(payload) {'),src.indexOf('async function updateDocument(')),save);
+ save.addDocument({title:'First'});save.addDocument({title:'Second'});assert.equal(adds,1);tx.onerror({target:{error:new Error('Failure')}});save.addDocument({title:'Retry'});assert.equal(adds,2);
+ const u=vm.createContext({});vm.runInContext(fs.readFileSync(path.join(root,'public/js/utils.js'),'utf8'),u);assert.equal(u.getNextProjectNumber([{projectNo:'999A'},{projectNo:'2'}]),3);assert.ok(u.compareProjectNumbers({projectNo:'999A'},{projectNo:'2'})>0);
+ console.log('Audit frontend regressions passed.');
+})().catch(e=>{console.error(e);process.exitCode=1});
