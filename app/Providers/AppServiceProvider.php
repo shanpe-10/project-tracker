@@ -19,6 +19,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        if (config('tracker.cloud')) \Illuminate\Support\Facades\URL::forceScheme('https');
     }
 }

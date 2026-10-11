@@ -188,15 +188,15 @@ class FocusedAuditTest extends TestCase
 
     public function test_alert_updates_and_history_are_atomic_and_permission_checked(): void
     {
-        $record=$this->project(['noa'=>'2020-01-01']);
-        $changed=array_replace($record,['timelineAlertsCompleted'=>['noa-overdue'],'timelineMarkedDoneDate'=>'2026-10-05T00:00:00Z']);
+        $record=$this->project(['timelineAlertsCompleted'=>['noa-overdue','ntp-overdue'],'timelineMarkedDoneDate'=>'2026-10-05T00:00:00Z']);
+        $changed=array_replace($record,['timelineAlertsCompleted'=>['ntp-overdue']]);
         DB::statement("ALTER TABLE history ADD CONSTRAINT audit_fail_history CHECK (data->>'action' <> 'FAIL')");
         $this->api(['action'=>'saveTimelineRecord','record'=>$changed,'history'=>['action'=>'FAIL','details'=>'Demo']])->assertStatus(500);
         $this->assertSame($record['updatedAt'],json_decode(DB::table('projects')->value('data'),true)['updatedAt']);
         $this->assertSame(0,DB::table('audit_log')->count());
         $this->assertSame(0,DB::table('history')->count());
-        $saved=$this->api(['action'=>'saveTimelineRecord','record'=>$changed,'history'=>['action'=>'Mark Timeline Complete','details'=>'Demo']])->assertOk()->json('record');
-        $this->assertSame(['noa-overdue'],$saved['timelineAlertsCompleted']);
+        $saved=$this->api(['action'=>'saveTimelineRecord','record'=>$changed,'history'=>['action'=>'Restore historical NOA','details'=>'Demo']])->assertOk()->json('record');
+        $this->assertSame(['ntp-overdue'],$saved['timelineAlertsCompleted']);
         $this->assertSame(1,DB::table('history')->count());
         DB::table('users')->insert(['id'=>2,'username'=>'resolver','full_name'=>'Resolver','password_hash'=>'hash','role'=>'staff','active'=>true,'can_resolve_alerts'=>true]);
         $this->session['tracker_user']=['id'=>2];
@@ -389,18 +389,15 @@ class FocusedAuditTest extends TestCase
         $this->assertSame($record['updatedAt'],json_decode(DB::table('projects')->value('data'),true)['updatedAt']);
     }
 
-    public function test_noa_and_legacy_ntp_manual_resolution_and_restore_remain_available(): void
+    public function test_noa_and_legacy_ntp_manual_resolutions_are_rejected(): void
     {
         $record=$this->project(['noa'=>'2020-01-01','ntpDate'=>'2020-01-01']);
         foreach (['noa-warning','noa-active','noa-overdue','ntp-award','ntp-overdue'] as $type) {
-            $record=$this->api(['action'=>'saveTimelineRecord','record'=>array_replace($record,['timelineAlertsCompleted'=>[$type]]),'history'=>['action'=>'Allowed manual reminder']])->assertOk()->json('record');
-            $this->assertSame([$type],$record['timelineAlertsCompleted']);
-            $record=$this->api(['action'=>'saveTimelineRecord','record'=>array_replace($record,['timelineAlertsCompleted'=>[]]),'history'=>['action'=>'Restore reminder']])->assertOk()->json('record');
-            $this->assertSame([],$record['timelineAlertsCompleted']);
+            $this->api(['action'=>'saveTimelineRecord','record'=>array_replace($record,['timelineAlertsCompleted'=>[$type]]),'history'=>['action'=>'Rejected manual reminder']])->assertStatus(422);
         }
-        $this->assertSame(10,DB::table('history')->count());
-        $record=$this->api(['action'=>'saveProject','record'=>array_replace($record,['biddingDate'=>'2020-01-01'])])->assertOk()->json('record');
-        $this->api(['action'=>'saveTimelineRecord','record'=>array_replace($record,['timelineAlertsCompleted'=>['ntp-overdue']]),'history'=>['action'=>'Reject bidding NTP']])->assertStatus(422);
+        $this->assertSame(0,DB::table('history')->count());
+        $this->assertSame(0,DB::table('audit_log')->count());
+        $this->assertArrayNotHasKey('timelineAlertsCompleted',json_decode(DB::table('projects')->value('data'),true));
     }
 
     public function test_historical_markers_survive_edits_and_can_still_be_restored(): void

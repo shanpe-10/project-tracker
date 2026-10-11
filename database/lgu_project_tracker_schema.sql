@@ -155,3 +155,17 @@ CREATE TABLE IF NOT EXISTS "import_job_changes" (
 CREATE INDEX IF NOT EXISTS "import_changes_batch_idx" ON "import_job_changes" ("batch_id","id");
 
 INSERT INTO project_number_sequences (sequence_name,next_number) VALUES ('projects',1) ON CONFLICT (sequence_name) DO NOTHING;
+
+
+CREATE TABLE IF NOT EXISTS project_editing_presence (
+    user_id bigint NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    editor_token varchar(32) NOT NULL,
+    project_id bigint NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    session_key varchar(64) NOT NULL,
+    last_seen_at timestamp NOT NULL,
+    ended_at timestamp NULL,
+    PRIMARY KEY (user_id, editor_token)
+);
+CREATE INDEX IF NOT EXISTS project_editing_presence_project_id_last_seen_at_index ON project_editing_presence(project_id, last_seen_at);
+CREATE INDEX IF NOT EXISTS project_editing_presence_session_key_index ON project_editing_presence(session_key);
+CREATE INDEX IF NOT EXISTS project_editing_presence_last_seen_at_index ON project_editing_presence(last_seen_at);

@@ -24,11 +24,12 @@ function getProjectMilestoneAlerts(project, today = timelineCalendarDay(new Date
         const actual = actualField ? projectCalendarDate(project[actualField]) : null;
         if (!due || (actual && project[actualField] <= today) || resolved.includes(type) || resolved.includes(overdueType)) return;
         const warning = new Date(due.getTime());
-        warning.setUTCDate(warning.getUTCDate() - lead);
+        warning.setTime(addProjectWorkdays(warning, -(lead)).getTime());
         if (today < warning.toISOString().slice(0, 10)) return;
         const overdue = today > dates[field];
         alerts.push({ type: overdue ? overdueType : type, label: label + (overdue ? " Overdue" : " Due"), dueDate: dates[field], project });
     };
+    append("noaDueDate", "noa", "noa-due", "noa-due-overdue", "NOA", getTimelineDays("noa"));
     append("preInspectionDueDate", "preInspection", "pre-inspection", "pre-inspection-overdue", "Pre-inspection", getTimelineDays("bidding"));
     append("ntpDueDate", "ntpDate", "ntp-due", "ntp-due-overdue", "Notice to Proceed", getTimelineDays("bidding"));
     append("materialTestingDueDate", "materialTestingDate", "material-test", "material-overdue", "Material Testing", getTimelineDays("bidding"));
@@ -37,41 +38,12 @@ function getProjectMilestoneAlerts(project, today = timelineCalendarDay(new Date
 }
 
 
-function isTimelineAlertManuallyResolvable(project, type) {
-    if (["noa-warning", "noa-active", "noa-overdue"].includes(type)) return true;
-    return ["ntp-award", "ntp-overdue"].includes(type) && !projectCalendarDate(project?.biddingDate);
-}
-
-function getManualTimelineAlertOptions(project, today = timelineCalendarDay(new Date())) {
-    if (!today || project.archivedAt || project.timelineCompletedMarked || ["completed", "released"].includes(String(project.status || "").trim().toLowerCase())) return [];
-    const completed = Array.isArray(project.timelineAlertsCompleted) ? project.timelineAlertsCompleted : [];
-    const options = [];
-    const append = (type, label) => {
-        if (!completed.includes(type) && !getAutomaticTimelineResolutions(project,today).some(item => item.aliases.includes(type)) && isTimelineAlertManuallyResolvable(project, type)) options.push({type, label});
-    };
-    const noa = projectCalendarDate(project.noa);
-    if (noa) {
-        const warning = new Date(noa); warning.setUTCDate(warning.getUTCDate() - getTimelineDays("noa"));
-        const deadline = new Date(noa); deadline.setUTCDate(deadline.getUTCDate() + getTimelineDays("noa"));
-        if (today >= warning.toISOString().slice(0, 10) && today < project.noa) append("noa-warning", "NOA Warning");
-        if (today >= project.noa && today <= deadline.toISOString().slice(0, 10)) append("noa-active", "NOA Active");
-        if (today > deadline.toISOString().slice(0, 10)) append("noa-overdue", "NOA Overdue");
-    }
-    const ntp = projectCalendarDate(project.ntpDate);
-    if (ntp && !projectCalendarDate(project.biddingDate) && !completed.some(type => ["ntp-award", "ntp-overdue"].includes(type))) {
-        const deadline = new Date(ntp); deadline.setUTCDate(deadline.getUTCDate() + getTimelineDays("ntp"));
-        if (today >= project.ntpDate && today <= deadline.toISOString().slice(0, 10)) append("ntp-award", "NTP Award");
-        if (today > deadline.toISOString().slice(0, 10)) append("ntp-overdue", "NTP Overdue");
-    }
-    return options;
-}
-
 function canResolveTimelineAlerts() {
     return window.currentUser?.role === "admin" || window.currentUser?.canResolveAlerts === true;
 }
 
 function notifyResolvePermissionRequired() {
-    showSystemNotification("You do not have permission to mark or restore resolved alerts.");
+    showSystemNotification("You do not have permission to restore historical alerts.");
 }
 
 function getTimelineDays(type) {
@@ -216,7 +188,7 @@ function getAwardingDate(completionDateStr) {
     );
 
 
-    return target;
+    return projectWeekday(target, false);
 }
 
 
@@ -234,6 +206,7 @@ function checkNoaFifteenDayWindowAlert(
     noaDateStr,
     status
 ) {
+    if (projectCalendarDate(arguments[2]?.noaDueDate)) return false;
     if (
         !noaDateStr ||
         ["Completed", "Released"].includes(status)
@@ -280,9 +253,7 @@ function checkNoaFifteenDayWindowAlert(
         );
 
 
-    noaDeadlineDate.setDate(
-        noaDeadlineDate.getDate() + getTimelineDays("noa")
-    );
+    noaDeadlineDate.setTime(addProjectWorkdays(noaDeadlineDate, getTimelineDays("noa"), false).getTime());
 
 
     return (
@@ -333,9 +304,7 @@ function getNoaDaysRemaining(
         );
 
 
-    noaDeadlineDate.setDate(
-        noaDeadlineDate.getDate() + getTimelineDays("noa")
-    );
+    noaDeadlineDate.setTime(addProjectWorkdays(noaDeadlineDate, getTimelineDays("noa"), false).getTime());
 
 
     noaDeadlineDate.setHours(
@@ -346,18 +315,7 @@ function getNoaDaysRemaining(
     );
 
 
-    return Math.ceil(
-        (
-            noaDeadlineDate.getTime() -
-            today.getTime()
-        ) /
-        (
-            1000 *
-            60 *
-            60 *
-            24
-        )
-    );
+    return projectWorkdaysBetween(today, noaDeadlineDate);
 }
 
 
@@ -371,6 +329,7 @@ function checkNoaOverdueWindowAlert(
     status,
     doc
 ) {
+    if (projectCalendarDate(arguments[2]?.noaDueDate)) return false;
     if (
         !noaDateStr ||
         ["Completed", "Released"].includes(status)
@@ -417,9 +376,7 @@ function checkNoaOverdueWindowAlert(
         );
 
 
-    noaDeadlineDate.setDate(
-        noaDeadlineDate.getDate() + getTimelineDays("noa")
-    );
+    noaDeadlineDate.setTime(addProjectWorkdays(noaDeadlineDate, getTimelineDays("noa"), false).getTime());
 
 
     return today > noaDeadlineDate;
@@ -472,9 +429,7 @@ function getNtpDaysRemaining(
         );
 
 
-    ntpDeadlineDate.setDate(
-        ntpDeadlineDate.getDate() + getTimelineDays("ntp")
-    );
+    ntpDeadlineDate.setTime(addProjectWorkdays(ntpDeadlineDate, getTimelineDays("ntp"), false).getTime());
 
 
     ntpDeadlineDate.setHours(
@@ -485,18 +440,7 @@ function getNtpDaysRemaining(
     );
 
 
-    return Math.ceil(
-        (
-            ntpDeadlineDate.getTime() -
-            today.getTime()
-        ) /
-        (
-            1000 *
-            60 *
-            60 *
-            24
-        )
-    );
+    return projectWorkdaysBetween(today, ntpDeadlineDate);
 }
 
 
@@ -557,9 +501,7 @@ function checkNtpAwardingActiveWindow(
         );
 
 
-    ntpDeadlineDate.setDate(
-        ntpDeadlineDate.getDate() + getTimelineDays("ntp")
-    );
+    ntpDeadlineDate.setTime(addProjectWorkdays(ntpDeadlineDate, getTimelineDays("ntp"), false).getTime());
 
 
     return (
@@ -626,9 +568,7 @@ function checkNtpOverdueWindowAlert(
         );
 
 
-    ntpDeadlineDate.setDate(
-        ntpDeadlineDate.getDate() + getTimelineDays("ntp")
-    );
+    ntpDeadlineDate.setTime(addProjectWorkdays(ntpDeadlineDate, getTimelineDays("ntp"), false).getTime());
 
 
     return today > ntpDeadlineDate;
@@ -698,9 +638,7 @@ function checkMaterialTestFifteenDayWindow(
         );
 
 
-    materialTestDeadline.setDate(
-        materialTestDeadline.getDate() + getTimelineDays("material")
-    );
+    materialTestDeadline.setTime(addProjectWorkdays(materialTestDeadline, getTimelineDays("material"), false).getTime());
 
 
     return (
@@ -768,9 +706,7 @@ function checkMaterialTestOverdueWindowAlert(
         );
 
 
-    materialTestDeadline.setDate(
-        materialTestDeadline.getDate() + getTimelineDays("material")
-    );
+    materialTestDeadline.setTime(addProjectWorkdays(materialTestDeadline, getTimelineDays("material"), false).getTime());
 
 
     return today > materialTestDeadline;
@@ -790,8 +726,7 @@ function checkFifteenDayWindowAlert(
     status
 ) {
     if (
-        !completionDateStr ||
-        !["Completed", "Released"].includes(status)
+        !completionDateStr || String(status || "").trim().toLowerCase() === "released"
     ) {
         return false;
     }
@@ -833,9 +768,7 @@ function checkFifteenDayWindowAlert(
         );
 
 
-    warningStartDate.setDate(
-        warningStartDate.getDate() - getTimelineDays("completion")
-    );
+    warningStartDate.setTime(addProjectWorkdays(warningStartDate, -getTimelineDays("completion"), false).getTime());
 
 
     return (
@@ -847,81 +780,6 @@ function checkFifteenDayWindowAlert(
 /* ==========================================================================
    RESOLVE / UNRESOLVE TIMELINE ALERTS
    ========================================================================== */
-
-
-function invokeTimelineMarkDoneAction(
-    id,
-    alertType
-) {
-    if (!canResolveTimelineAlerts()) {
-        notifyResolvePermissionRequired();
-        return;
-    }
-    if (!db) {
-        return;
-    }
-    if (!alertType) {
-        promptTimelineMarkDoneAction(id);
-        return;
-    }
-
-
-    const transaction =
-        db.transaction(
-            [
-                "projects",
-                "history"
-            ],
-            "readwrite"
-        );
-
-
-    const projectStore =
-        transaction.objectStore(
-            "projects"
-        );
-
-
-    projectStore
-        .get(id)
-        .onsuccess = event => {
-
-            const record =
-                event.target.result;
-
-
-            if (!record) {
-                return;
-            }
-
-
-            if (!isTimelineAlertManuallyResolvable(record, alertType)) {
-                showSystemNotification("Record the actual milestone date to resolve this alert.");
-                return;
-            }
-            record.timelineAlertsCompleted = Array.isArray(record.timelineAlertsCompleted) ? record.timelineAlertsCompleted : [];
-            if (record.timelineAlertsCompleted.includes(alertType)) return;
-            record.timelineAlertsCompleted.push(alertType);
-            record.timelineMarkedDoneDate = new Date().toISOString();
-
-            projectStore.putTimeline(record, {
-                projectId: id,
-
-                timestamp:
-                    new Date()
-                        .toISOString(),
-
-                action: `Mark ${alertType} Timeline Alert Complete`,
-                details: `Cleared ${alertType} timeline warning for project "${record.title || id}".`
-            });
-        };
-
-
-    transaction.onerror = event => showSystemNotification(event.target.error?.message || "Unable to update alerts. Refresh and try again.");
-    transaction.oncomplete = () => {
-        loadDocuments();
-    };
-}
 
 
 function invokeTimelineUnmarkDoneAction(
@@ -1095,169 +953,6 @@ function invokeTimelineUnmarkDoneAction(
 
 
 /* ==========================================================================
-   RESOLVE ALERT MODAL
-   ========================================================================== */
-
-
-function promptTimelineMarkDoneAction(id) {
-    if (!canResolveTimelineAlerts()) {
-        notifyResolvePermissionRequired();
-        return;
-    }
-    if (!db) {
-        return;
-    }
-
-
-    const transaction =
-        db.transaction(
-            ["projects"],
-            "readonly"
-        );
-
-
-    const projectStore =
-        transaction.objectStore(
-            "projects"
-        );
-
-
-    const request =
-        projectStore.get(id);
-
-
-    request.onsuccess = event => {
-
-        const record =
-            event.target.result;
-
-
-        if (!record) {
-            return;
-        }
-
-
-        const options = getManualTimelineAlertOptions(record);
-
-        if (options.length === 0) {
-
-            alert(
-                "Record actual milestone dates to resolve these alerts. Mark Done is available only for NOA and legacy NTP reminders."
-            );
-
-            return;
-        }
-
-
-        const modalTitle =
-            document.getElementById(
-                "timelineMarkDoneModalTitle"
-            );
-
-
-        const modalBody =
-            document.getElementById(
-                "timelineMarkDoneModalBody"
-            );
-
-
-        if (modalTitle) {
-
-            modalTitle.textContent =
-                `Resolve Timeline Event for: ${
-                    record.title ||
-                    `Project ${
-                        record.projectNo ||
-                        id
-                    }`
-                }`;
-        }
-
-
-        if (modalBody) {
-
-            modalBody.innerHTML =
-                options
-                    .map(
-                        option => `
-                            <button
-                                type="button"
-                                class="btn btn-outline-success w-100 text-start mb-2"
-                                onclick="selectTimelineMarkDone('${option.type}', ${id})"
-                            >
-                                <strong>
-                                    ${option.label}
-                                </strong>
-                            </button>
-                        `
-                    )
-                    .join("");
-        }
-
-
-        const modalNode =
-            document.getElementById(
-                "timelineMarkDoneModal"
-            );
-
-
-        if (modalNode) {
-
-            const bsModal =
-                bootstrap.Modal
-                    .getOrCreateInstance(
-                        modalNode
-                    );
-
-
-            bsModal.show();
-        }
-    };
-
-
-    request.onerror = event => {
-
-        console.error(
-            "Unable to load project timeline alerts:",
-            event.target.error
-        );
-    };
-}
-
-
-function selectTimelineMarkDone(
-    alertType,
-    id
-) {
-    const modalNode =
-        document.getElementById(
-            "timelineMarkDoneModal"
-        );
-
-
-    if (modalNode) {
-
-        const modalInstance =
-            bootstrap.Modal
-                .getInstance(
-                    modalNode
-                );
-
-
-        if (modalInstance) {
-            modalInstance.hide();
-        }
-    }
-
-
-    invokeTimelineMarkDoneAction(
-        id,
-        alertType
-    );
-}
-
-
-/* ==========================================================================
    RESOLVED ALERTS WORKSPACE
    ========================================================================== */
 
@@ -1403,7 +1098,7 @@ function isMilestoneDateCompleted(value, today = timelineCalendarDay(new Date())
 function getAutomaticTimelineResolutions(project, today = timelineCalendarDay(new Date())) {
     const dates = getProjectMilestoneDates(project);
     const definitions = [
-        ["noa", "noa-active", "Notice of Award", ["noa-warning", "noa-active", "noa-overdue"], project.noa],
+        ["noa", dates.noaDueDate ? "noa-due" : "noa-active", "Notice of Award", ["noa-warning", "noa-active", "noa-overdue", "noa-due", "noa-due-overdue"], dates.noaDueDate || project.noa],
         ["preInspection", "pre-inspection", "Pre-inspection deadline", ["pre-inspection", "pre-inspection-overdue"], dates.preInspectionDueDate],
         ["ntpDate", "ntp-due", "NTP issuance deadline", ["ntp-due", "ntp-due-overdue", "ntp-award", "ntp-overdue"], dates.ntpDueDate],
         ["materialTestingDate", "material-test", "Material testing deadline", ["material-test", "material-overdue"], dates.materialTestingDueDate],
@@ -1415,7 +1110,7 @@ function getAutomaticTimelineResolutions(project, today = timelineCalendarDay(ne
         if (!date || !today || project[field] > today) return [];
         if (field === "materialTestingDate" && !dueDate) {
             const start = projectCalendarDate(project.ntpDate);
-            if (start) { start.setUTCDate(start.getUTCDate() + getTimelineDays("material")); dueDate = start.toISOString().slice(0, 10); }
+            if (start) { start.setTime(addProjectWorkdays(start, (getTimelineDays("material"))).getTime()); dueDate = start.toISOString().slice(0, 10); }
         }
         return [{type, label, aliases, doneDate: project[field], dueDate, automatic: true}];
     });
@@ -1430,7 +1125,7 @@ function resolvedTimelineEntries(project, today = timelineCalendarDay(new Date()
         if (projectCalendarDate(project.completion) && project.completion <= today) types.push("award-overdue");
         if (!types.length) types = ["resolved-general"];
     }
-    const labels = {"noa-warning":"NOA issuance deadline","noa-active":"NOA issuance deadline","noa-overdue":"NOA issuance deadline","ntp-award":"NTP issuance deadline","ntp-overdue":"NTP issuance deadline","ntp-due":"NTP issuance deadline","ntp-due-overdue":"NTP issuance deadline","material-test":"Material testing deadline","material-overdue":"Material testing deadline","award-close":"SWA contractor reminder","award-overdue":"SWA contractor follow-up","pre-inspection":"Pre-inspection deadline","pre-inspection-overdue":"Pre-inspection deadline","final-inspection":"Final inspection deadline","final-inspection-overdue":"Final inspection deadline","resolved-general":"Resolved timeline alert"};
+    const labels = {"noa-due":"NOA issuance deadline","noa-due-overdue":"NOA issuance deadline","noa-warning":"NOA issuance deadline","noa-active":"NOA issuance deadline","noa-overdue":"NOA issuance deadline","ntp-award":"NTP issuance deadline","ntp-overdue":"NTP issuance deadline","ntp-due":"NTP issuance deadline","ntp-due-overdue":"NTP issuance deadline","material-test":"Material testing deadline","material-overdue":"Material testing deadline","award-close":"SWA contractor reminder","award-overdue":"SWA contractor follow-up","pre-inspection":"Pre-inspection deadline","pre-inspection-overdue":"Pre-inspection deadline","final-inspection":"Final inspection deadline","final-inspection-overdue":"Final inspection deadline","resolved-general":"Resolved timeline alert"};
     const entries = types.map(type => {
         const auto = automatic.find(item => item.aliases.includes(type));
         return {project, type, label: labels[type] || type.replace(/-/g, " "), doneDate: project.timelineMarkedDoneDate, ...(auto ? {...auto, type} : {})};
@@ -1597,7 +1292,7 @@ function scheduleDashboardDataLoad() {
     dashboardLoadTimer = setTimeout(() => loadDashboardData(1), 300);
 }
 
-async function loadDashboardData(page = dashboardAlertPage) {
+async function loadDashboardData(page = dashboardAlertPage, silent = false) {
     if (!window.apiClient || activeWorkspace !== "dashboard") return;
     const requestSequence = ++dashboardRequestSequence;
     const selectedStatusYear = /^\d{4}$/.test(dashboardStatusYear) ? dashboardStatusYear : String(new Date().getFullYear());
@@ -1649,9 +1344,11 @@ async function loadDashboardData(page = dashboardAlertPage) {
         refreshGlobalNotifications();
         const lastUpdated = document.getElementById("dashboardLastUpdated");
         if (lastUpdated) lastUpdated.textContent = `Last updated: just now · ${new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
+        return true;
     } catch (error) {
         console.error("Unable to load dashboard data:", error);
-        showSystemNotification(error.message || "Unable to load dashboard data.");
+        if (!silent) showSystemNotification(error.message || "Unable to load dashboard data.");
+        return false;
     }
 }
 
@@ -1754,9 +1451,6 @@ function groupDashboardAlerts(alerts) {
 function filterDashboardAlertsList() {
     const list = document.getElementById("dashboardNotificationList");
     if (!list) return;
-    document.getElementById("dashboardSelectAllBar")?.classList.add("d-none");
-    document.getElementById("dashboardSelectAllBar")?.classList.remove("d-flex");
-    document.getElementById("dashboardBulkDoneBtn")?.classList.add("d-none");
     const groups = groupDashboardAlerts(activeDashboardAlertsData);
     list.innerHTML = groups.length ? groups.map(group => {
         const overdue = group.alerts.filter(item => item.type.includes("overdue")).length;
@@ -1775,222 +1469,3 @@ window.addEventListener("resize", () => {
     clearTimeout(window.dashboardAlertResizeTimer);
     window.dashboardAlertResizeTimer = setTimeout(updateDashboardAlertScrollLimit, 100);
 });
-
-
-/* ==========================================================================
-   DASHBOARD BULK SELECTION
-   ========================================================================== */
-
-
-function toggleAllDashboardCheckboxes(
-    masterCheckbox
-) {
-    const checkboxes =
-        document.querySelectorAll(
-            ".dashboard-item-checkbox:not(:disabled)"
-        );
-
-
-    checkboxes.forEach(
-        checkbox => {
-            checkbox.checked =
-                masterCheckbox.checked;
-        }
-    );
-
-
-    updateDashboardSelectionCounter();
-}
-
-
-function updateDashboardSelectionCounter() {
-
-    const checkedBoxes =
-        document.querySelectorAll(
-            ".dashboard-item-checkbox:checked:not(:disabled)"
-        );
-
-
-    const countLabel =
-        document.getElementById(
-            "dashboardSelectCount"
-        );
-
-
-    if (countLabel) {
-
-        countLabel.textContent =
-            checkedBoxes.length;
-    }
-}
-
-
-function executeDashboardBulkMarkDone() {
-    if (!canResolveTimelineAlerts()) {
-        notifyResolvePermissionRequired();
-        return;
-    }
-
-    const checkedBoxes =
-        document.querySelectorAll(
-            ".dashboard-item-checkbox:checked:not(:disabled)"
-        );
-
-
-    if (checkedBoxes.length === 0) {
-
-        alert(
-            "Please select at least one checkbox warning item row to update."
-        );
-
-        return;
-    }
-
-
-    if (
-        !confirm(
-            `Are you sure you want to resolve and process all (${checkedBoxes.length}) marked timeline entries simultaneously?`
-        )
-    ) {
-        return;
-    }
-
-
-    const transaction =
-        db.transaction(
-            [
-                "projects",
-                "history"
-            ],
-            "readwrite"
-        );
-
-
-    const projectStore =
-        transaction.objectStore(
-            "projects"
-        );
-
-
-    const updatesByProject =
-        new Map();
-
-
-    checkedBoxes.forEach(
-        checkbox => {
-
-            const id =
-                parseInt(
-                    checkbox.getAttribute(
-                        "data-project-id"
-                    ),
-                    10
-                );
-
-
-            const alertType =
-                checkbox.getAttribute(
-                    "data-alert-type"
-                );
-
-
-            if (
-                !updatesByProject.has(
-                    id
-                )
-            ) {
-
-                updatesByProject.set(
-                    id,
-                    new Set()
-                );
-            }
-
-
-            if (alertType) {
-
-                updatesByProject
-                    .get(id)
-                    .add(alertType);
-            }
-        }
-    );
-
-
-    updatesByProject.forEach(
-        (alertTypes, id) => {
-
-            projectStore
-                .get(id)
-                .onsuccess = event => {
-
-                    const record =
-                        event.target.result;
-
-
-                    if (!record) {
-                        return;
-                    }
-
-
-                    const manualTypes = [...alertTypes].filter(type => isTimelineAlertManuallyResolvable(record, type));
-                    if (!manualTypes.length) return;
-                    record.timelineAlertsCompleted =
-                        Array.isArray(
-                            record.timelineAlertsCompleted
-                        )
-                            ? record.timelineAlertsCompleted
-                            : [];
-
-
-                    let anyNew =
-                        false;
-
-
-                    manualTypes.forEach(
-                        type => {
-
-                            if (
-                                !record.timelineAlertsCompleted
-                                    .includes(type)
-                            ) {
-
-                                record.timelineAlertsCompleted
-                                    .push(type);
-
-
-                                anyNew =
-                                    true;
-                            }
-                        }
-                    );
-
-
-                    if (!anyNew) return;
-                    record.timelineMarkedDoneDate = new Date().toISOString();
-
-
-                    projectStore.putTimeline(record, {
-                        projectId:
-                            id,
-
-                        timestamp:
-                            new Date()
-                                .toISOString(),
-
-                        action:
-                            "Bulk Mark Timeline Complete",
-
-                        details:
-                            `Marked timeline alert(s) [${manualTypes.join(", ")}] done for project "${record.title || id}".`
-                    });
-                };
-        }
-    );
-
-
-    transaction.onerror = event => showSystemNotification(event.target.error?.message || "Unable to update alerts. Refresh and try again.");
-    transaction.oncomplete = () => {
-        loadDocuments();
-    };
-}

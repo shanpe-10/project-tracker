@@ -37,8 +37,20 @@ function applyAuthenticatedUser(user, csrfToken) {
     if (photo) {
         photo.classList.add("d-none");
     }
+    const menuAvatar = document.getElementById("accountMenuAvatar");
+    if (menuAvatar && avatar) {
+        menuAvatar.textContent = initial || "U";
+        menuAvatar.style.backgroundImage = avatar.style.backgroundImage;
+        menuAvatar.classList.toggle("has-photo", Boolean(user.profilePhoto));
+    }
+    const menuRole = document.getElementById("accountMenuRole");
+    if (menuRole) menuRole.textContent = ({superadmin: "Superadmin", admin: "Administrator", staff: "Staff"})[user.role] || "Account";
     document.getElementById("accountRequestsTabBtn")?.classList.toggle("d-none", !["admin", "superadmin"].includes(user.role));
     const isSuperadmin = user.role === "superadmin";
+    document.getElementById('superadminGuideContent')?.classList.toggle('d-none', !isSuperadmin);
+    document.getElementById('projectUserGuideContent')?.classList.toggle('d-none', isSuperadmin);
+    const guideTitle=document.getElementById('systemGuideTitle');if(guideTitle)guideTitle.textContent=isSuperadmin?'Superadmin guide':'How to use the Project Tracker';
+    const guideLabel=document.getElementById('systemGuideNavigationLabel');if(guideLabel)guideLabel.textContent=isSuperadmin?'Superadmin guide':'How to use this tracker';
     document.body.classList.toggle("account-management-only", isSuperadmin);
     document.querySelectorAll("[data-project-navigation]").forEach(button => button.hidden = isSuperadmin);
     const eyebrow = document.getElementById("administrationPageEyebrow");
@@ -48,16 +60,17 @@ function applyAuthenticatedUser(user, csrfToken) {
     setPermissionControlState("exportExcelButton", user.canExport, "Ask Superadmin for Export Excel permission.");
     setPermissionControlState("importExcelButton", user.canImport, "Ask Superadmin for Import Excel permission.");
     setPermissionControlState("deleteAllRecordsButton", user.canDeleteAll, "Ask Superadmin for Delete all records permission.");
-    setPermissionControlState("dashboardBulkDoneBtn", user.canResolveAlerts, "Ask Superadmin for Mark/restore alerts permission.");
     clearInterval(window.accountNotificationTimer);
     window.pendingAccountRequests = [];
     const management = document.getElementById("accountManagementCard");
+    const holidayCard=document.getElementById('holidayCalendarCard');
+    if (holidayCard) { holidayCard.hidden=!isSuperadmin; holidayCard.classList.toggle('d-none',!isSuperadmin); }
     if (management) management.hidden = user.role !== "superadmin";
     document.querySelectorAll("[data-admin-section]").forEach(section => section.hidden = user.role !== "admin");
     const title = document.getElementById("administrationPageTitle");
     const description = document.getElementById("administrationPageDescription");
     if (title) title.textContent = user.role === "superadmin" ? "Accounts" : "Administration";
-    if (description) description.textContent = user.role === "superadmin" ? "Create, edit, delete and approve accounts; manage Staff permissions." : "Manage timeline reminders, recent activity and automatic backups.";
+    if (description) description.textContent = user.role === "superadmin" ? "Create, edit and delete accounts; manage Staff permissions and holidays." : "Manage timeline reminders, recent activity and automatic backups.";
     const tab = document.querySelector("#accountRequestsTabBtn span:last-child");
     if (tab) tab.textContent = user.role === "superadmin" ? "Accounts" : "Admin";
     document.body.classList.remove("authentication-required");
@@ -70,6 +83,7 @@ function applyAuthenticatedUser(user, csrfToken) {
 }
 function showLogin(message = "") {
     if (typeof resetFormAccess === "function") resetFormAccess({ silent: true, navigate: false, preserveDraft: true });
+    if (typeof stopProjectEditingPresence === "function") void stopProjectEditingPresence({ clear: true });
     window.currentUser = null;
     db = null; window.db = null; window.dbReady = false;
     window.pendingAccountRequests = [];
@@ -117,6 +131,7 @@ async function signIn(event) {
 async function signOut() {
     clearInterval(window.accountNotificationTimer);
     sessionStorage.removeItem("lguProjectTrackerWorkspace");
+    if (typeof stopProjectEditingPresence === "function") await stopProjectEditingPresence({ clear: true });
     await authRequest("logout");
     // A clean page removes cached records and restarts the session gate.
     window.location.reload();

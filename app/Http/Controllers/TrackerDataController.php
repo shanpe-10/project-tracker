@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Support\FormattedProjectExport;
 use App\Support\TrackerMilestones;
+use App\Support\TrackerHistory;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,7 +14,7 @@ class TrackerDataController extends Controller
 {
     private const PROJECT_DATE_FIELDS = [
         'biddingDate', 'prDate', 'obre', 'resolutionDate', 'noticePostQual',
-        'noa', 'performanceBond', 'contractRef', 'ntpDate', 'dole',
+        'noa', 'noaDueDate', 'performanceBond', 'contractRef', 'ntpDate', 'dole',
         'contractEndDate', 'preInspection', 'materialTestingDate', 'finalInspection', 'swa',
         'ldNewCompletionDate', 'completion',
     ];
@@ -39,16 +40,39 @@ class TrackerDataController extends Controller
         ]);
         $action = (string) $request->query('action', '');
 
-        return match ($action) {
+        $response = match ($action) {
             'listProjects' => $this->listProjects($request),
             'projectHistory' => $this->projectHistory($request),
-            'projectVersion' => response()->json(['ok' => true, 'version' => DB::table('audit_log')->whereIn('entity_type', ['project', 'projects'])->max('id').':'.DB::table('projects')->count()]),
+            'projectVersion' => response()->json(['ok' => true, 'version' => $this->projectVersion()]),
             'nextProjectNumber' => response()->json(['ok' => true, 'nextProjectNumber' => (string) max(1, (int) DB::table('project_number_sequences')->where('sequence_name', 'projects')->value('next_number'))]),
             'dashboard' => $this->dashboard($request),
             'notifications' => $this->notifications(),
             'projectAlerts' => $this->projectAlertDetails($request),
-            default => response()->json(['ok' => true, 'projects' => $this->records('projects'), 'history' => [], 'timelineSettings' => $this->timelineSettings()]),
+            default => $this->bootstrapData(),
         };
+        $response->headers->set('Cache-Control', 'private, no-store');
+        return $response;
+    }
+
+    private function projectVersion(): string
+    {
+        return hash('sha256', json_encode([
+            DB::table('audit_log')->whereIn('entity_type', ['project', 'projects', 'import_job'])->max('id'),
+            DB::table('projects')->count(),
+            \App\Support\TrackerHolidays::state()['revision'],
+            $this->timelineSettings(),
+        ]));
+    }
+
+    private function bootstrapData(): JsonResponse
+    {
+        // Capture the marker BEFORE reading records. A later commit must not be
+        // acknowledged until the browser has actually loaded its data.
+        $version = $this->projectVersion();
+        return response()->json(['ok' => true, 'version' => $version,
+            'projects' => $this->records('projects'), 'history' => [],
+            'timelineSettings' => $this->timelineSettings(),
+            'holidayCalendar' => \App\Support\TrackerHolidays::calendar()]);
     }
 
     public function post(Request $request): JsonResponse
@@ -130,6 +154,7 @@ class TrackerDataController extends Controller
             'dole' => \App\Support\TrackerSql::date('dole'),
             'contractEndDate' => \App\Support\TrackerSql::date('contractEndDate'),
             'preInspection' => \App\Support\TrackerSql::date('preInspection'),
+            'noaDueDate' => \App\Support\TrackerSql::date('noaDueDate'),
             'materialTestingDate' => \App\Support\TrackerSql::date('materialTestingDate'),
             'finalInspection' => \App\Support\TrackerSql::date('finalInspection'),
             'ldNewCompletionDate' => \App\Support\TrackerSql::date('ldNewCompletionDate'),
@@ -171,7 +196,7 @@ class TrackerDataController extends Controller
                 return response()->json(['ok' => false, 'message' => 'You do not have permission to export projects.'], 403);
             }
             $rows = $query->orderByRaw($order)->pluck('data');
-            $columns = ['projectNo' => 'Project No.', 'biddingDate' => 'Date of Bidding', 'title' => 'Project Title', 'approvedBudget' => 'ABC', 'bidAmount' => 'Bid Amount', 'winningBidder' => 'Winning Bidder', 'sourceOfFund' => 'Source of Fund', 'prNumber' => 'PR Number', 'prDate' => 'PR Date', 'obre' => 'OBRE', 'resolutionNumber' => 'Resolution Number', 'resolutionDate' => 'Resolution Date', 'noticePostQual' => 'Notice of Post Qualification', 'noa' => 'Notice of Award', 'performanceBond' => 'Performance Bond', 'contractRef' => 'Contract Date', 'contractDuration' => 'Contract Duration', 'ntpDate' => 'Notice to Proceed', 'dole' => 'DOLE Clearance', 'contractEndDate' => 'Contract End Date', 'preInspection' => 'Pre Inspection', 'finalInspection' => 'Final Inspection', 'swa' => 'SWA', 'ldAmount' => 'LD Amount', 'ldNoOfDays' => 'LD Days', 'ldNewCompletionDate' => 'Extended Completion Date', 'ldActualDuration' => 'Actual Construction Duration', 'completion' => 'Completion Date', 'status' => 'Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date'];
+            $columns = ['projectNo' => 'Project No.', 'biddingDate' => 'Date of Bidding', 'title' => 'Project Title', 'approvedBudget' => 'ABC', 'bidAmount' => 'Bid Amount', 'winningBidder' => 'Winning Bidder', 'sourceOfFund' => 'Source of Fund', 'prNumber' => 'PR Number', 'prDate' => 'PR Date', 'obre' => 'OBRE', 'resolutionNumber' => 'Resolution Number', 'resolutionDate' => 'Resolution Date', 'noticePostQual' => 'Notice of Post Qualification', 'noa' => 'Notice of Award', 'performanceBond' => 'Performance Bond', 'contractRef' => 'Contract Date', 'contractDuration' => 'Contract Duration', 'ntpDate' => 'Notice to Proceed', 'dole' => 'DOLE Clearance', 'contractEndDate' => 'Contract End Date', 'preInspection' => 'Pre Inspection', 'finalInspection' => 'Final Inspection', 'swa' => 'SWA', 'ldAmount' => 'LD Amount', 'ldNoOfDays' => 'LD Days', 'ldNewCompletionDate' => 'Extended Completion Date', 'ldActualDuration' => 'Actual Construction Duration', 'completion' => 'Completion Date', 'status' => 'Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date'];
 
             if ($request->query('format') === 'xlsx') {
                 $records = $rows->map(fn ($json) => json_decode($json, true) ?: []);
@@ -219,11 +244,19 @@ class TrackerDataController extends Controller
         if ($id < 1) {
             return response()->json(['ok' => false, 'message' => 'Invalid project id.'], 422);
         }
-        $p = DB::table('history')->where('project_id', $id)->orderByDesc('event_at')->orderByDesc('id')->paginate($pageSize);
+        $p = DB::table('history as h')
+            ->leftJoin('users as u', 'u.id', '=', 'h.updated_by')
+            ->select('h.*', 'u.id as actor_id', 'u.username as actor_username', 'u.full_name as actor_full_name')
+            ->where('h.project_id', $id)->orderByDesc('h.event_at')->orderByDesc('h.id')->paginate($pageSize);
         $history = collect($p->items())->map(function ($row) {
             $record = json_decode($row->data, true) ?: [];
             $record['id'] = (int) $row->id;
-
+            // New logs retain the account at the time of the action. Older logs use their own actor.
+            if (! is_array($record['actor'] ?? null)) {
+                $record['actor'] = $row->actor_id ? TrackerHistory::actor([
+                    'id' => $row->actor_id, 'username' => $row->actor_username, 'fullName' => $row->actor_full_name,
+                ]) : ['id' => null, 'username' => is_string($record['updatedBy'] ?? null) ? $record['updatedBy'] : '', 'fullName' => ''];
+            }
             return $record;
         });
 
@@ -268,7 +301,8 @@ class TrackerDataController extends Controller
             $due = match ($resolved['type']) {
                 'pre-inspection'=>$dates['preInspectionDueDate'], 'ntp-due'=>$dates['ntpDueDate'],
                 'material-test'=>$dates['materialTestingDueDate'], 'final-inspection'=>$dates['finalInspectionDueDate'],
-                'noa-active'=>$project['noa'] ?? null,
+                'award-overdue','award-close'=>$this->projectDate($project, 'completion') ? TrackerMilestones::weekday($this->projectDate($project, 'completion')->modify('+1 year'))->format('Y-m-d') : null,
+                'noa-due'=>$dates['noaDueDate'], 'noa-active'=>$project['noa'] ?? null,
                 default=>null,
             };
             $alerts[] = ['type'=>$resolved['type'],'label'=>$this->alertLabel($resolved['type']),'status'=>'Resolved','doneDate'=>$resolved['doneDate'],'dueDate'=>$due];
@@ -279,7 +313,7 @@ class TrackerDataController extends Controller
             $alerts[] = ['type'=>$type,'label'=>$this->alertLabel($type),'status'=>'Resolved','doneDate'=>$project['timelineMarkedDoneDate'] ?? null];
         }
         if (! $row->archived_at && empty($project['timelineCompletedMarked']) && ! in_array(strtolower($project['status'] ?? ''),['completed','released'],true)) {
-            foreach (['pre-inspection'=>'preInspectionDueDate','ntp-due'=>'ntpDueDate','material-test'=>'materialTestingDueDate','final-inspection'=>'finalInspectionDueDate'] as $type=>$field) {
+            foreach (['noa-due'=>'noaDueDate','pre-inspection'=>'preInspectionDueDate','ntp-due'=>'ntpDueDate','material-test'=>'materialTestingDueDate','final-inspection'=>'finalInspectionDueDate'] as $type=>$field) {
                 if ($dates[$field] && ! array_filter($alerts,fn ($a)=>str_starts_with($a['type'],$type) || ($type==='material-test' && str_starts_with($a['type'],'material')))) {
                     $alerts[] = ['type'=>$type,'label'=>$this->alertLabel($type),'status'=>'Upcoming','dueDate'=>$dates[$field]];
                 }
@@ -406,15 +440,10 @@ class TrackerDataController extends Controller
         }
         if ($project && ! $id && ! $request->boolean('isImport')) {
             $biddingDate = (string) ($record['biddingDate'] ?? '');
-            if (! self::validProjectDate($biddingDate)) {
-                return response()->json(['ok' => false, 'message' => 'Date of Bidding is required and must be valid.'], 422);
-            }
+
             $budget = preg_replace('/[₱$,\s]/u', '', (string) ($record['approvedBudget'] ?? ''));
             if (! preg_match('/^\d+(\.\d{1,2})?$/', $budget)) {
                 return response()->json(['ok' => false, 'message' => 'Approved Budget is required and must be a non-negative amount with at most two decimal places.'], 422);
-            }
-            if (trim((string) ($record['winningBidder'] ?? '')) === '') {
-                return response()->json(['ok' => false, 'message' => 'Winning Bidder is required.'], 422);
             }
         }
         if ($project && strtolower(trim((string) ($record['status'] ?? ''))) === 'completed' && ! self::validProjectDate($record['completion'] ?? null)) {
@@ -434,7 +463,7 @@ class TrackerDataController extends Controller
             $allowed = ['id','updatedAt','updatedBy','timelineAlertsCompleted','timelineCompletedMarked','timelineMarkedDoneDate','timelineUnmarkedType','timelineUnmarkedAt'];
             $businessBefore = array_diff_key($before,array_flip($allowed));
             $businessAfter = array_diff_key($record,array_flip($allowed));
-            if ($businessBefore != $businessAfter) return response()->json(['ok'=>false,'message'=>'Alert permission only allows marking or restoring alerts.'],403);
+            if ($businessBefore != $businessAfter) return response()->json(['ok'=>false,'message'=>'Alert permission only allows restoring historical alerts.'],403);
         }
         if ($project) {
             $previous = $id ? json_decode((string)DB::table('projects')->where('id',$id)->value('data'), true) : [];
@@ -446,6 +475,8 @@ class TrackerDataController extends Controller
         $clientUpdatedAt = (string) ($record['updatedAt'] ?? '');
         unset($record['id']);
         $record['updatedBy'] = $user['username'];
+        if ($project) unset($record['actor']);
+        else $record['actor'] = TrackerHistory::actor($user);
         $record['updatedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
         $json = json_encode($record, JSON_UNESCAPED_UNICODE);
         if ($project) {
@@ -524,11 +555,11 @@ class TrackerDataController extends Controller
             $before=json_decode($row->data,true) ?: [];
             $allowed=array_flip(['id','updatedAt','updatedBy','timelineAlertsCompleted','timelineCompletedMarked','timelineMarkedDoneDate','timelineUnmarkedType','timelineUnmarkedAt']);
             if (array_diff_key($before,$allowed) != array_diff_key($record,$allowed)) {
-                return response()->json(['ok'=>false,'message'=>'Alert permission only allows marking or restoring alerts.'],403);
+                return response()->json(['ok'=>false,'message'=>'Alert permission only allows restoring historical alerts.'],403);
             }
             $response=$this->saveRecord($request,'saveProject');
             if ($response->getStatusCode() !== 200) return $response;
-            $history=['projectId'=>(int)$record['id'],'timestamp'=>now('UTC')->format('Y-m-d\TH:i:s.u\Z'),'action'=>$request->input('history.action'),'details'=>$request->input('history.details',''),'updatedBy'=>$user['username']];
+            $history=['projectId'=>(int)$record['id'],'timestamp'=>now('UTC')->format('Y-m-d\TH:i:s.u\Z'),'action'=>$request->input('history.action'),'details'=>$request->input('history.details',''),'updatedBy'=>$user['username'],'actor'=>TrackerHistory::actor($user)];
             DB::table('history')->insert(['data'=>json_encode($history,JSON_UNESCAPED_UNICODE),'project_id'=>$record['id'],'event_at'=>now(),'updated_by'=>$user['id'],'updated_at'=>now()]);
             return $response;
         });
@@ -585,7 +616,7 @@ class TrackerDataController extends Controller
             $record['updatedBy'] = $user['username'];
             $record['updatedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
             DB::table('projects')->where('id', $id)->update(['data' => json_encode($record, JSON_UNESCAPED_UNICODE), 'archived_at' => $archived ? now() : null, 'updated_by' => $user['id'], 'updated_at' => now()]);
-            $history = ['projectId' => $id, 'editedAt' => now('UTC')->format('Y-m-d\TH:i:s.u\Z'), 'changes' => json_encode($before, JSON_UNESCAPED_UNICODE), 'action' => $archived ? 'Archived' : 'Restored', 'updatedBy' => $user['username']];
+            $history = ['projectId' => $id, 'editedAt' => now('UTC')->format('Y-m-d\TH:i:s.u\Z'), 'changes' => json_encode($before, JSON_UNESCAPED_UNICODE), 'action' => $archived ? 'Archived' : 'Restored', 'updatedBy' => $user['username'], 'actor' => TrackerHistory::actor($user)];
             DB::table('history')->insert(['data' => json_encode($history, JSON_UNESCAPED_UNICODE), 'project_id' => $id, 'event_at' => now(), 'updated_by' => $user['id'], 'updated_at' => now()]);
             $this->audit($user, $archived ? 'project.archived' : 'project.restored', 'project', $id, $archived ? 'Archived project.' : 'Restored project.');
 
@@ -657,11 +688,9 @@ class TrackerDataController extends Controller
         $directory = rtrim((string) config('tracker.attachments'), '\\/').DIRECTORY_SEPARATOR.$projectId;
         foreach ($project['attachments'] ?? [] as $attachment) {
             $name = basename((string) ($attachment['storedName'] ?? ''));
-            if ($name && is_file($directory.DIRECTORY_SEPARATOR.$name)) {
-                @unlink($directory.DIRECTORY_SEPARATOR.$name);
-            }
+            if ($name) { try { \App\Support\TrackerMediaStore::delete('attachments', $projectId.'/'.$name); } catch (\Throwable $error) { report($error); } }
         }
-        if (is_dir($directory)) {
+        if (! \App\Support\TrackerMediaStore::cloud() && is_dir($directory)) {
             @rmdir($directory);
         }
     }
@@ -887,14 +916,15 @@ class TrackerDataController extends Controller
         $alerts = TrackerMilestones::alerts($project, $settings, $today);
         $push = function (string $type, string $label) use (&$alerts, $project, $today): void {
             if (! $this->alertResolved($project, $type, $today)) {
-                $alerts[] = ['type' => $type, 'label' => $label, 'project' => $project];
+                $due = str_starts_with($type, 'award') && ($completion=$this->projectDate($project, 'completion')) ? TrackerMilestones::weekday($completion->modify('+1 year'))->format('Y-m-d') : null;
+                $alerts[] = ['type' => $type, 'label' => $label, 'project' => $project, 'dueDate'=>$due];
             }
         };
         $completed = in_array(strtolower(trim((string) ($project['status'] ?? ''))), ['completed', 'released'], true);
         if (! $completed) {
-            if ($noa = $this->projectDate($project, 'noa')) {
-                $warning = $noa->modify('-'.$settings['noa'].' days');
-                $deadline = $noa->modify('+'.$settings['noa'].' days');
+            if (! TrackerMilestones::date($project['noaDueDate'] ?? null) && ($noa = $this->projectDate($project, 'noa'))) {
+                $warning = TrackerMilestones::addWorkdays($noa, -$settings['noa']);
+                $deadline = TrackerMilestones::addWorkdays($noa, $settings['noa']);
                 if ($today >= $warning && $today < $noa) {
                     $push('noa-warning', 'NOA Warning');
                 }
@@ -906,7 +936,7 @@ class TrackerDataController extends Controller
                 }
             }
             if ($ntp = $this->projectDate($project, 'ntpDate')) {
-                $material = $ntp->modify('+'.$settings['material'].' days');
+                $material = TrackerMilestones::addWorkdays($ntp, $settings['material']);
                 if (! TrackerMilestones::date($project['biddingDate'] ?? null) && ! $this->alertResolved($project, 'material-test', $today) && ! $this->alertResolved($project, 'material-overdue', $today)) {
                     if ($today >= $ntp && $today <= $material) {
                         $push('material-test', 'Material Test');
@@ -914,7 +944,7 @@ class TrackerDataController extends Controller
                         $push('material-overdue', 'Material Test Overdue');
                     }
                 }
-                $award = $ntp->modify('+'.$settings['ntp'].' days');
+                $award = TrackerMilestones::addWorkdays($ntp, $settings['ntp']);
                 if (! TrackerMilestones::date($project['biddingDate'] ?? null) && ! $this->alertResolved($project, 'ntp-award', $today) && ! $this->alertResolved($project, 'ntp-overdue', $today)) {
                     if ($today >= $ntp && $today <= $award) {
                         $push('ntp-award', 'NTP Award');
@@ -925,11 +955,11 @@ class TrackerDataController extends Controller
             }
         }
         $swa = $this->projectDate($project, 'swa');
-        if ($completed && (! $swa || $swa > $today) && ($completion = $this->projectDate($project, 'completion'))) {
-            $due = $completion->modify('+1 year');
+        if (strtolower(trim((string)($project['status'] ?? ''))) !== 'released' && !$swa && ($completion = $this->projectDate($project, 'completion'))) {
+            $due = TrackerMilestones::weekday($completion->modify('+1 year'));
             if ($today >= $due) {
                 $push('award-overdue', 'SWA Due — Notify Contractor');
-            } elseif ($today >= $due->modify('-'.$settings['completion'].' days')) {
+            } elseif ($today >= TrackerMilestones::addWorkdays($due, -$settings['completion'])) {
                 $push('award-close', 'SWA Reminder — Notify Contractor');
             }
         }

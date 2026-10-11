@@ -9,6 +9,8 @@ use Illuminate\Support\Facades\Route;
 Route::view('/', 'tracker');
 Route::post('/api/auth.php', [TrackerAuthController::class, 'handle']);
 Route::middleware('tracker.auth')->group(function () {
+    Route::match(['get', 'post'], '/api/holidays.php', [\App\Http\Controllers\TrackerHolidayController::class, 'handle']);
+    Route::match(['get', 'post'], '/api/project-presence.php', [\App\Http\Controllers\TrackerProjectPresenceController::class, 'handle']);
     Route::get('/api/data.php', [TrackerDataController::class, 'get']);
     Route::post('/api/data.php', [TrackerDataController::class, 'post']);
     Route::get('/api/attachments.php', [TrackerMediaController::class, 'attachment']);

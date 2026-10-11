@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Support\TrackerHistory;
+use App\Support\TrackerMediaStore;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TrackerMediaController extends Controller
 {
@@ -55,7 +58,7 @@ class TrackerMediaController extends Controller
                 }
                 \App\Support\TrackerProjectInput::validateDates($incoming, $before);
                 $record = $incoming;
-                unset($record['id'], $record['attachments'], $record['archivedAt'], $record['archivedBy']);
+                unset($record['id'], $record['actor'], $record['attachments'], $record['archivedAt'], $record['archivedBy']);
                 $record = \App\Support\TrackerProjectInput::normalize(array_replace($before, $record));
                 \App\Support\TrackerProjectInput::validateAlertPermission($record,$before,!empty($user['canResolveAlerts']));
                 \App\Support\TrackerProjectInput::validateManualResolution($record, $before);
@@ -67,18 +70,14 @@ class TrackerMediaController extends Controller
                         throw new \InvalidArgumentException('Completed projects require a valid Completion Date.');
                     }
                 }
-                $directory = config('tracker.attachments').'/'.$projectId;
                 $attachments = array_values(array_filter($before['attachments'] ?? [], fn ($item) => is_array($item) && ! empty($item['id']) && ! empty($item['storedName'])));
                 foreach ($deleteIds as $deleteId) {
                     $match = collect($attachments)->first(fn ($item) => hash_equals((string) $item['id'], (string) $deleteId));
                     if (! $match) {
                         throw new \InvalidArgumentException('An attachment to remove was not found. Refresh and try again.');
                     }
-                    $deletePaths[] = $directory.'/'.basename((string) $match['storedName']);
+                    $deletePaths[] = $projectId.'/'.basename((string) $match['storedName']);
                     $attachments = array_values(array_filter($attachments, fn ($item) => ! hash_equals((string) $item['id'], (string) $deleteId)));
-                }
-                if ($files && ! is_dir($directory) && ! mkdir($directory, 0750, true) && ! is_dir($directory)) {
-                    throw new \RuntimeException('The attachment folder could not be created.');
                 }
                 foreach ($files as $file) {
                     $mime = $file->getMimeType();
@@ -86,8 +85,8 @@ class TrackerMediaController extends Controller
                     $name = mb_substr(basename($file->getClientOriginalName()), 0, 255);
                     $attachmentId = md5(Str::uuid()->toString());
                     $stored = $attachmentId.($file->getClientOriginalExtension() ? '.'.preg_replace('/[^a-z0-9]/', '', strtolower($file->getClientOriginalExtension())) : '');
-                    $file->move($directory, $stored);
-                    $movedPaths[] = $directory.'/'.$stored;
+                    TrackerMediaStore::upload('attachments', $projectId.'/'.$stored, $file);
+                    $movedPaths[] = $projectId.'/'.$stored;
                     $attachments[] = ['id' => $attachmentId, 'name' => $name, 'storedName' => $stored, 'mime' => $mime, 'size' => $size, 'uploadedAt' => now('UTC')->format('Y-m-d\TH:i:s.u\Z'), 'uploadedBy' => $user['username']];
                 }
                 $record['attachments'] = $attachments;
@@ -95,7 +94,7 @@ class TrackerMediaController extends Controller
                 $record['updatedBy'] = $user['username'];
                 $record['updatedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
                 DB::table('projects')->where('id', $projectId)->update(['data' => json_encode($record, JSON_UNESCAPED_UNICODE)] + TrackerDataController::projectColumns($record) + ['updated_by' => $user['id'], 'updated_at' => now()]);
-                $history = ['projectId' => $projectId, 'editedAt' => now('UTC')->format('Y-m-d\TH:i:s.u\Z'), 'changes' => json_encode($before, JSON_UNESCAPED_UNICODE), 'updatedBy' => $user['username']];
+                $history = ['projectId' => $projectId, 'editedAt' => now('UTC')->format('Y-m-d\TH:i:s.u\Z'), 'changes' => json_encode($before, JSON_UNESCAPED_UNICODE), 'updatedBy' => $user['username'], 'actor' => TrackerHistory::actor($user)];
                 DB::table('history')->insert(['data' => json_encode($history, JSON_UNESCAPED_UNICODE), 'project_id' => $projectId, 'event_at' => now(), 'updated_by' => $user['id'], 'updated_at' => now()]);
                 DB::table('audit_log')->insert(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => 'project.saved', 'entity_type' => 'project', 'entity_id' => $projectId, 'summary' => 'Saved project: '.$record['title'], 'created_at' => now()]);
 
@@ -103,7 +102,7 @@ class TrackerMediaController extends Controller
             });
         } catch (\Throwable $error) {
             foreach ($movedPaths as $path) {
-                if (is_file($path)) @unlink($path);
+                try { TrackerMediaStore::delete('attachments', $path); } catch (\Throwable $cleanupError) { report($cleanupError); }
             }
             if ($error instanceof \DomainException || $error instanceof \InvalidArgumentException) {
                 return response()->json(['ok' => false, 'message' => $error->getMessage()], $error instanceof \DomainException ? 409 : 422);
@@ -111,14 +110,14 @@ class TrackerMediaController extends Controller
             throw $error;
         }
         foreach ($deletePaths as $path) {
-            if (is_file($path)) @unlink($path);
+            try { TrackerMediaStore::delete('attachments', $path); } catch (\Throwable $cleanupError) { report($cleanupError); }
         }
         $record['id'] = $projectId;
 
         return response()->json(['ok' => true, 'record' => $record]);
     }
 
-    public function attachment(Request $request): JsonResponse|BinaryFileResponse
+    public function attachment(Request $request): JsonResponse|BinaryFileResponse|StreamedResponse
     {
         $user = (array) $request->session()->get('tracker_user');
         $request->validate(['projectId'=>['required','integer','min:1'],'attachmentId'=>['sometimes','nullable','string'],'action'=>['sometimes','nullable','string']]);
@@ -136,16 +135,14 @@ class TrackerMediaController extends Controller
             if (! $item) {
                 return response()->json(['ok' => false, 'message' => 'Attachment not found.'], 404);
             }
-            $path = config('tracker.attachments').'/'.$projectId.'/'.basename((string) $item['storedName']);
-            if (! is_file($path)) {
+            $path = $projectId.'/'.basename((string) $item['storedName']);
+            if (! TrackerMediaStore::exists('attachments', $path)) {
                 return response()->json(['ok' => false, 'message' => 'Attachment file is unavailable.'], 404);
             }
 
             $name = basename(str_replace('\\','/',(string)($item['name'] ?? 'attachment')));
             $name = str_replace(["\r","\n","\0"],'',$name) ?: 'attachment';
-            $fallback = preg_replace('/[^A-Za-z0-9._-]/','_',$name);
-            return response()->file($path, ['Content-Type'=>$item['mime'] ?? 'application/octet-stream','X-Content-Type-Options'=>'nosniff'])
-                ->setContentDisposition($request->query('download') === '1' ? 'attachment' : 'inline', $name, $fallback);
+            return TrackerMediaStore::response('attachments', $path, ['Content-Type'=>$item['mime'] ?? 'application/octet-stream','X-Content-Type-Options'=>'nosniff', 'Cache-Control'=>'private, no-store'], $name, $request->query('download') === '1' ? 'attachment' : 'inline');
 
         }
 
@@ -165,10 +162,9 @@ class TrackerMediaController extends Controller
         return !empty($payload['ok']) ? response()->json(['ok'=>true,'attachments'=>$payload['record']['attachments']]) : $response;
     }
 
-    public function profile(Request $request): JsonResponse|BinaryFileResponse
+    public function profile(Request $request): JsonResponse|BinaryFileResponse|StreamedResponse
     {
         $user = (array) $request->session()->get('tracker_user');
-        $directory = config('tracker.profile_photos');
         if ($request->isMethod('get')) {
             $request->validate(['userId'=>['sometimes','integer','min:1']]);
             $id = (int) $request->query('userId', $user['id']);
@@ -176,12 +172,11 @@ class TrackerMediaController extends Controller
                 return response()->json(['ok' => false, 'message' => 'Not allowed.'], 403);
             }
             $photo = basename((string) DB::table('users')->where('id', $id)->value('profile_photo'));
-            $path = $directory.'/'.$photo;
-            if ($photo === '' || ! is_file($path)) {
+            if ($photo === '' || ! TrackerMediaStore::exists('profile_photos', $photo)) {
                 return response()->json(['ok' => false, 'message' => 'Profile photo not found.'], 404);
             }
 
-            return response()->file($path, ['Cache-Control' => 'private, max-age=3600']);
+            return TrackerMediaStore::response('profile_photos', $photo, ['Cache-Control' => 'private, max-age=3600', 'X-Content-Type-Options'=>'nosniff']);
         }
         $request->validate(['fullName'=>['required','string','max:160'],'photo'=>['sometimes','file']]);
         $fullName = trim((string) $request->input('fullName'));
@@ -195,9 +190,8 @@ class TrackerMediaController extends Controller
             if (!$photo->isValid() || $photo->getSize() < 1 || $photo->getSize() > 3*1024*1024 || !isset($extensions[$photo->getMimeType()])) {
                 return response()->json(['ok'=>false,'message'=>'Use a JPG, PNG, or WebP image smaller than 3 MB.'],422);
             }
-            if (!is_dir($directory) && !mkdir($directory,0750,true) && !is_dir($directory)) throw new \RuntimeException('The profile photo folder is unavailable.');
             $photoName=$user['id'].'-'.Str::random(24).'.'.$extensions[$photo->getMimeType()];
-            $photo->move($directory,$photoName);
+            TrackerMediaStore::upload('profile_photos', $photoName, $photo);
         }
         $previous = '';
         try {
@@ -212,10 +206,10 @@ class TrackerMediaController extends Controller
                 return $photoName ?? $previous;
             });
         } catch (\Throwable $error) {
-            if ($photoName !== null && is_file($directory.'/'.$photoName)) @unlink($directory.'/'.$photoName);
+            if ($photoName !== null) { try { TrackerMediaStore::delete('profile_photos', $photoName); } catch (\Throwable $cleanupError) { report($cleanupError); } }
             throw $error;
         }
-        if ($photoName !== null && $previous && is_file($directory.'/'.$previous)) @unlink($directory.'/'.$previous);
+        if ($photoName !== null && $previous) { try { TrackerMediaStore::delete('profile_photos', $previous); } catch (\Throwable $cleanupError) { report($cleanupError); } }
         $photoName=$savedName;
         $user['fullName'] = $fullName;
         $user['profilePhoto'] = $photoName ? 'api/profile.php?action=photo&v='.rawurlencode(now('UTC')->format('YmdHis.u')) : null;

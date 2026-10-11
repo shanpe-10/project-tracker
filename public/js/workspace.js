@@ -125,7 +125,7 @@ function switchWorkspace(targetWorkspace) {
 
         const button =
             findTabButtonByText(
-                "mark done"
+                "resolved alerts"
             );
 
 
@@ -154,6 +154,7 @@ function switchWorkspace(targetWorkspace) {
         if (button) button.classList.add("active");
         container.classList.add("view-account-requests");
         if (window.currentUser?.role === "superadmin") loadAccountRequests();
+        if (typeof loadHolidayCalendar === "function") loadHolidayCalendar();
         if (window.currentUser?.role === "admin") { loadAuditLog(); loadBackupSettings(); loadTimelineLeadTimes(); }
     }
 

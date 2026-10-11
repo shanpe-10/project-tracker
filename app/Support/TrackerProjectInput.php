@@ -3,7 +3,7 @@ namespace App\Support;
 use Illuminate\Validation\ValidationException;
 final class TrackerProjectInput
 {
-    public const DATE_FIELDS = ['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completion'];
+    public const DATE_FIELDS = ['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completion'];
 
     public static function normalize(array $record): array
     {
@@ -12,7 +12,21 @@ final class TrackerProjectInput
         if ($days !== null && TrackerMilestones::date($record['contractRef'] ?? null)) {
             $record['contractEndDate'] = TrackerMilestones::dueDates($record)['contractDueDate'];
         }
+        $record['status'] = self::automaticStatus($record);
         return $record;
+    }
+
+    public static function automaticStatus(array $record, ?\DateTimeImmutable $today = null): string
+    {
+        $status=strtolower(trim((string)($record['status']??'')));
+        if(TrackerMilestones::date($record['swa']??null)||$status==='released') return 'Released';
+        if(TrackerMilestones::date($record['completion']??null)||$status==='completed') return 'Completed';
+        if(TrackerMilestones::date($record['finalInspection']??null)) return 'Pending';
+        $end=TrackerMilestones::date(TrackerMilestones::dueDates($record)['contractDueDate']);
+        $today=$today??new \DateTimeImmutable('today',new \DateTimeZone('Asia/Manila'));
+        if($end && $today->format('Y-m-d') >= $end->format('Y-m-d') && !TrackerMilestones::date($record['finalInspection']??null)) return 'Final-inspection';
+        if(TrackerMilestones::date($record['preInspection']??null) && TrackerMilestones::date($record['materialTestingDate']??null) && TrackerMilestones::date($record['ntpDate']??null)) return 'Pending';
+        return TrackerMilestones::date($record['biddingDate']??null)?'Pre-inspection':'On-going Bidding';
     }
 
     public static function validateDates(array $record, array $previous = []): void
@@ -24,21 +38,22 @@ final class TrackerProjectInput
             if (!\App\Http\Controllers\TrackerDataController::validProjectDate($value)) {
                 throw ValidationException::withMessages([$key => "Invalid $key date."]);
             }
+            if (! TrackerMilestones::isWorkday(TrackerMilestones::date($value))) {
+                throw ValidationException::withMessages([$key => "$key falls on a non-working weekday or excluded holiday. Choose a working date."]);
+            }
         }
     }
 
     public static function validateManualResolution(array $record, array $previous = []): void
     {
-        // Preserve historical flags, but do not allow new date-based or global dismissals.
+        // Existing historical dismissals can be retained or restored, never added.
         $completed = is_array($record['timelineAlertsCompleted'] ?? null) ? $record['timelineAlertsCompleted'] : [];
         $old = is_array($previous['timelineAlertsCompleted'] ?? null) ? $previous['timelineAlertsCompleted'] : [];
-        foreach (array_diff($completed, $old) as $type) {
-            if (! TrackerMilestones::canManuallyResolve(array_replace($previous, $record), $type)) {
-                throw ValidationException::withMessages(['timelineAlertsCompleted'=>'Record the actual milestone date to resolve this alert. Mark Done is available only for NOA and legacy NTP reminders.']);
-            }
+        if (array_diff($completed, $old)) {
+            throw ValidationException::withMessages(['timelineAlertsCompleted'=>'Record the actual milestone date to resolve this alert.']);
         }
         if (! empty($record['timelineCompletedMarked']) && empty($previous['timelineCompletedMarked'])) {
-            throw ValidationException::withMessages(['timelineCompletedMarked'=>'Resolve NOA or legacy NTP reminders individually; record actual dates for other milestones.']);
+            throw ValidationException::withMessages(['timelineCompletedMarked'=>'Record the actual milestone dates to resolve alerts.']);
         }
     }
 
@@ -48,7 +63,7 @@ final class TrackerProjectInput
         $defaults = ['timelineAlertsCompleted'=>[], 'timelineCompletedMarked'=>false, 'timelineMarkedDoneDate'=>null, 'timelineUnmarkedType'=>null, 'timelineUnmarkedAt'=>null];
         foreach ($defaults as $key=>$default) {
             if (($record[$key] ?? $default) !== ($previous[$key] ?? $default)) {
-                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['ok'=>false,'message'=>'Alert permission is required to mark or restore alerts.'],403));
+                throw new \Illuminate\Http\Exceptions\HttpResponseException(response()->json(['ok'=>false,'message'=>'Alert permission is required to restore historical alerts.'],403));
             }
         }
     }
@@ -56,12 +71,12 @@ final class TrackerProjectInput
     public static function validate(array $record): void
     {
         if (isset($record['id']) && filter_var($record['id'], FILTER_VALIDATE_INT, ['options'=>['min_range'=>0]]) === false) throw ValidationException::withMessages(['id'=>'Invalid record ID.']);
-        foreach (['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completion','updatedAt'] as $key) {
+        foreach (['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completion','updatedAt'] as $key) {
             if (isset($record[$key]) && !is_string($record[$key])) throw ValidationException::withMessages([$key=>"$key must be a date string."]);
         }
         $duration = $record['contractDuration'] ?? null;
         if ($duration !== null && $duration !== '' && TrackerMilestones::duration($duration) === null) {
-            throw ValidationException::withMessages(['contractDuration'=>'Contract duration must be a positive numeric value in calendar days (up to 36500).']);
+            throw ValidationException::withMessages(['contractDuration'=>'Contract duration must be a positive numeric value in working days (Monday–Friday) (up to 36500).']);
         }
         $limits = ['projectNo'=>60,'title'=>255,'status'=>100,'winningBidder'=>255,'sourceOfFund'=>160,'prNumber'=>120];
         foreach ($limits as $key=>$max) {

@@ -50,8 +50,8 @@ class RequireTrackerUser
 
         $request->session()->put('tracker_last_activity', time());
 
-        if ($account->role === 'superadmin' && ! $request->is('api/profile.php')) {
-            return response()->json(['ok' => false, 'message' => 'Superadmin access is limited to account management.'], 403);
+        if ($account->role === 'superadmin' && ! $request->is('api/profile.php', 'api/holidays.php')) {
+            return response()->json(['ok' => false, 'message' => 'Superadmin access is limited to account management and holiday settings.'], 403);
         }
 
         return $next($request);

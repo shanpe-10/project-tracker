@@ -14,7 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'tracker.auth' => \App\Http\Middleware\RequireTrackerUser::class,
         ]);
-        $middleware->validateCsrfTokens(except: ['api/auth.php', 'api/data.php', 'api/attachments.php', 'api/project-edit.php', 'api/profile.php', 'api/backups.php']);
+        $middleware->validateCsrfTokens(except: ['api/auth.php', 'api/data.php', 'api/attachments.php', 'api/project-edit.php', 'api/profile.php', 'api/backups.php', 'api/holidays.php', 'api/project-presence.php']);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->render(function (\Illuminate\Validation\ValidationException $error, \Illuminate\Http\Request $request) {

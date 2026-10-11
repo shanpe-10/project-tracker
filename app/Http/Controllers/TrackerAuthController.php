@@ -35,6 +35,7 @@ class TrackerAuthController extends Controller
             return response()->json(['ok' => false, 'message' => 'The security token is invalid.'], 419);
         }
         if ($action === 'logout') {
+            TrackerProjectPresenceController::endSession($request);
             $request->session()->invalidate();
             $request->session()->regenerateToken();
 
@@ -90,8 +91,9 @@ class TrackerAuthController extends Controller
 
     private function adminAction(Request $request, array $current, string $action): JsonResponse
     {
+        $originalSuperadminId = \App\Support\TrackerAccountProtection::originalSuperadminId();
         if ($action === 'listManagedUsers') {
-            $users = User::orderByRaw("CASE role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END")->orderBy('active')->orderBy('created_at')->get()->map(fn (User $u) => $this->userPayload($u) + ['active' => (bool) $u->active, 'createdAt' => \Carbon\CarbonImmutable::parse($u->created_at, 'UTC')->toIso8601String()]);
+            $users = User::orderByRaw("CASE role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END")->orderBy('active')->orderBy('created_at')->get()->map(fn (User $u) => $this->userPayload($u) + ['isOriginalSuperadmin' => (int) $u->id === $originalSuperadminId, 'active' => (bool) $u->active, 'createdAt' => \Carbon\CarbonImmutable::parse($u->created_at, 'UTC')->toIso8601String()]);
 
             return response()->json(['ok' => true, 'users' => $users]);
         }
@@ -117,6 +119,9 @@ class TrackerAuthController extends Controller
         $target = User::find($id);
         if (! $target) {
             return response()->json(['ok' => false, 'message' => 'The account was not found.'], 404);
+        }
+        if ((int) $target->id === $originalSuperadminId && in_array($action, ['rejectUser','deleteUser'], true)) {
+            return response()->json(['ok'=>false,'message'=>'The original Superadmin account is protected and cannot be deleted.'],422);
         }
         if ($target->id === $current['id'] && in_array($action, ['rejectUser','deleteUser'], true)) {
             return response()->json(['ok'=>false,'message'=>'You cannot delete your signed-in account.'],422);

@@ -234,6 +234,7 @@ const importPreviewAliases = {
     prDate: ["PR Date", "8. PR Date"], obre: ["OBRE", "9. OBRE", "9. OBRE Date"],
     resolutionDate: ["Resolution Date", "11. Resolution Date"],
     noticePostQual: ["Notice of Post Qualification", "12. Notice of Post Qualification"],
+    noaDueDate: ["NOA Due Date"],
     noa: ["Notice of Award", "13. Notice of Award"],
     performanceBond: ["Performance Bond", "14. Performance Bond"],
     contractRef: ["Contract Date", "15. Contract Date"],
@@ -606,6 +607,7 @@ function handleExcelImport(event) {
                 "Performance Bond": "performanceBond", "Contract Date": "contractRef",
                 "Contract Duration": "contractDuration", "Notice to Proceed": "ntpDate",
                 "DOLE Clearance": "dole", "Contract End Date": "contractEndDate",
+                "NOA Due Date": "noaDueDate",
                 "Material Testing Date": "materialTestingDate",
                 "Pre Inspection": "preInspection", "Final Inspection": "finalInspection",
                 "SWA": "swa", "LD Amount": "ldAmount", "LD Days": "ldNoOfDays",
@@ -620,7 +622,7 @@ function handleExcelImport(event) {
             const importRows = isServerExport ? rawRows.map(row => {
                 const mapped = { "Project No.": row["Project No."] };
                 Object.entries(exportedColumns).forEach(([heading, field]) => {
-                    if (field === "materialTestingDate" && !Object.hasOwn(row, heading)) return;
+                    if (["materialTestingDate", "noaDueDate"].includes(field) && !Object.hasOwn(row, heading)) return;
                     mapped[field] = row[heading] ?? "";
                 });
                 return mapped;
@@ -692,7 +694,7 @@ function handleExcelImport(event) {
    IMPORT ROW PROCESSING
    ========================================================================== */
 
-const importDateFields = ["biddingDate", "prDate", "obre", "resolutionDate", "noticePostQual", "noa", "performanceBond", "contractRef", "ntpDate", "dole", "contractEndDate", "preInspection", "materialTestingDate", "finalInspection", "swa", "ldNewCompletionDate", "completion"];
+const importDateFields = ["biddingDate", "prDate", "obre", "resolutionDate", "noticePostQual", "noa", "noaDueDate", "performanceBond", "contractRef", "ntpDate", "dole", "contractEndDate", "preInspection", "materialTestingDate", "finalInspection", "swa", "ldNewCompletionDate", "completion"];
 const importMoneyFields = ["approvedBudget", "bidAmount", "ldAmount"];
 
 function validateImportedProject(payload, rowNumber) {
@@ -920,6 +922,7 @@ getAllRequest.onsuccess =
 
                             contractEndDate: "",
 
+                            ...(Object.hasOwn(row, "NOA Due Date") || Object.hasOwn(row, "noaDueDate") ? { noaDueDate: parseImportDate(row["NOA Due Date"] ?? row.noaDueDate) } : {}),
                             ...(Object.hasOwn(row, "Material Testing Date") || Object.hasOwn(row, "materialTestingDate") ? { materialTestingDate: parseImportDate(row["Material Testing Date"] ?? row.materialTestingDate) } : {}),
                             preInspection: "",
 
@@ -1071,6 +1074,7 @@ getAllRequest.onsuccess =
                                     row["contractEndDate"]
                                 ),
 
+                            ...(Object.hasOwn(row, "NOA Due Date") || Object.hasOwn(row, "noaDueDate") ? { noaDueDate: parseImportDate(row["NOA Due Date"] ?? row.noaDueDate) } : {}),
                             ...(Object.hasOwn(row, "Material Testing Date") || Object.hasOwn(row, "materialTestingDate") ? { materialTestingDate: parseImportDate(row["Material Testing Date"] ?? row.materialTestingDate) } : {}),
                             preInspection:
                                 parseImportDate(

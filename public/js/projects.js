@@ -1,3 +1,36 @@
+function getStatusClass(status) {
+        const normalized =
+            (status || "Pending").trim().toLowerCase();
+
+        if (normalized === "completed") {
+            return "project-status-completed";
+        }
+
+        if (normalized === "released") {
+            return "project-status-released";
+        }
+
+        if (
+            normalized === "on-going bidding" ||
+            normalized === "on-bidding"
+        ) {
+            return "project-status-bidding";
+        }
+
+        if (normalized.includes("pre-inspection")) {
+            return "project-status-preinspection";
+        }
+
+        if (
+            normalized.includes("final-inspection") ||
+            normalized.includes("final inspection")
+        ) {
+            return "project-status-finalinspection";
+        }
+
+        return "project-status-pending";
+    }
+
 /* ==========================================================================
    PROJECT MANAGEMENT
    ========================================================================== */
@@ -32,6 +65,7 @@ let projectNumberSortDirection = localStorage.getItem("lguProjectTrackerProjectN
 let projectLifecycle = "active";
 let sharedProjectVersion = null;
 let sharedProjectSyncBusy = false;
+let sharedProjectCheckBusy = false;
 let projectEditSnapshot = null;
 
 function showSharedUpdatesIndicator(show) {
@@ -58,24 +92,45 @@ function hideNextProjectNumberPreview() {
 }
 
 function projectScreenIsBusy() {
-    return editingId !== null || document.body.classList.contains("project-edit-pane-open") || Boolean(document.querySelector(".modal.show"));
+    return projectSaveInProgress || editingId !== null || document.body.classList.contains("project-edit-pane-open")
+        || window.importInProgress === true || Boolean(document.querySelector("#importPreviewModal.show, #importConflictModal.show, #importProgressModal.show, #projectDuplicateModal.show"));
 }
 
 async function refreshSharedProjectData() {
-    if (window.currentUser?.role === "superadmin") return;
-    if (sharedProjectSyncBusy || !db) return;
+    if (window.currentUser?.role === "superadmin" || sharedProjectSyncBusy || !db) return;
+    if (projectScreenIsBusy()) {
+        showSharedUpdatesIndicator(true);
+        showSystemNotification("Shared changes are waiting. Save or cancel your current changes to load them safely.");
+        return;
+    }
     sharedProjectSyncBusy = true;
+    const database = db;
     const button = document.getElementById("sharedUpdatesButton");
     if (button) button.disabled = true;
     try {
-        await db.refresh();
-        const version = await apiClient.getProjectVersion();
-        sharedProjectVersion = version.version;
+        const accepted = await database.refresh();
+        if (db !== database || accepted === false) return;
+        // The marker belongs to this snapshot, not a separate, newer request.
+        let rendered = true;
+        if (activeWorkspace === "dashboard" && typeof loadDashboardData === "function") rendered = await loadDashboardData(undefined, true);
+        else if (["documents", "archive"].includes(activeWorkspace)) rendered = await loadServerProjectPage(true);
+        if (rendered === false) throw new Error("The view update is pending.");
+        sharedProjectVersion = database.projectVersion;
         showSharedUpdatesIndicator(false);
-        if (activeWorkspace === "dashboard" && typeof loadDashboardData === "function") await loadDashboardData();
-        else if (["documents", "archive"].includes(activeWorkspace)) await loadDocuments();
-        else if (activeWorkspace === "dashboard-done" && typeof renderMarkedDoneTabContents === "function") renderMarkedDoneTabContents();
+        if (activeWorkspace === "dashboard-done" && typeof renderMarkedDoneTabContents === "function") renderMarkedDoneTabContents();
+        if (typeof refreshGlobalNotifications === "function") refreshGlobalNotifications();
+        if (projectDetailsModalShown && projectDetailsEditId !== null) {
+            const tx = database.transaction(["projects"], "readonly");
+            tx.objectStore("projects").get(projectDetailsEditId).onsuccess = event => {
+                if (!projectDetailsModalShown || db !== database) return;
+                if (event.target.result) viewProjectDetails(projectDetailsEditId, projectDetailsEditSource === "alerts" ? "needs-attention" : "projects");
+                else bootstrap.Modal.getInstance(document.getElementById("projectDetailsModal"))?.hide();
+            };
+        }
     } catch (error) {
+        sharedProjectVersion = null;
+        showSharedUpdatesIndicator(true);
+        if (button) button.title = "Automatic refresh failed. Select to retry when your connection returns.";
         console.warn("Unable to refresh shared project changes:", error);
     } finally {
         sharedProjectSyncBusy = false;
@@ -84,29 +139,40 @@ async function refreshSharedProjectData() {
 }
 
 async function checkForSharedProjectUpdates() {
-    if (window.currentUser?.role === "superadmin") return;
-    if (document.hidden || sharedProjectSyncBusy || !window.currentUser) return;
+    if (window.currentUser?.role === "superadmin" || document.hidden || sharedProjectSyncBusy || sharedProjectCheckBusy || !window.currentUser || !db) return;
+    sharedProjectCheckBusy = true;
+    const database = db;
     try {
         const result = await apiClient.getProjectVersion();
-        if (sharedProjectVersion === null) {
-            sharedProjectVersion = result.version;
-            return;
-        }
-        if (result.version === sharedProjectVersion) return;
+        if (db !== database) return;
+        // A missing baseline triggers a refresh; it must never swallow a change
+        // made between initial loading and the first update check.
+        if (result.version === sharedProjectVersion && sharedProjectVersion !== null) return;
         if (projectScreenIsBusy()) {
             showSharedUpdatesIndicator(true);
             return;
         }
         await refreshSharedProjectData();
     } catch (error) {
+        showSharedUpdatesIndicator(true);
         console.warn("Unable to check for shared project changes:", error);
+    } finally {
+        sharedProjectCheckBusy = false;
     }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
-    window.setTimeout(checkForSharedProjectUpdates, 5000);
-    window.setInterval(checkForSharedProjectUpdates, 20000);
+window.addEventListener("sharedDatabaseReady", () => {
+    sharedProjectVersion = db?.projectVersion ?? null;
+    showSharedUpdatesIndicator(false);
+    checkForSharedProjectUpdates();
 });
+document.addEventListener("DOMContentLoaded", () => {
+    window.setInterval(checkForSharedProjectUpdates, 3000);
+});
+document.addEventListener("visibilitychange", () => { if (!document.hidden) checkForSharedProjectUpdates(); });
+document.addEventListener("hidden.bs.modal", checkForSharedProjectUpdates);
+window.addEventListener("focus", checkForSharedProjectUpdates);
+window.addEventListener("online", checkForSharedProjectUpdates);
 
 function updateProjectLifecycleControls() {
     document.querySelectorAll(".projects-lifecycle-tabs button").forEach(button => button.classList.remove("active"));
@@ -189,7 +255,7 @@ function prepareProjectListForLoad() {
     const info = document.getElementById("paginationInfo");
     const controls = document.getElementById("paginationControls");
     if (table) {
-        table.innerHTML = '<tr class="projects-loading-row"><td colspan="7"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Loading projects…</span></td></tr>';
+        table.innerHTML = '<tr class="projects-loading-row"><td colspan="8"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Loading projects…</span></td></tr>';
     }
     if (info) info.textContent = "Loading project records…";
     if (controls) controls.replaceChildren();
@@ -399,6 +465,27 @@ function deleteProjectAttachment(attachmentId) {
 }
 
 let projectSaveInProgress = false;
+function setProjectSaveState(saving, message = "", failed = false) {
+    projectSaveInProgress = saving;
+    const button = document.getElementById("saveBtn");
+    if (button) {
+        button.disabled = saving;
+        button.textContent = saving ? "Saving…" : editingId === null ? "Save Project" : "Apply Records Change";
+        button.setAttribute("aria-busy", String(saving));
+    }
+    for (const id of ["cancelEditBtn", "editPaneCloseButton"]) {
+        const control = document.getElementById(id);
+        if (control) control.disabled = saving;
+    }
+    const status = document.getElementById("projectSaveStatus");
+    if (status && message) {
+        status.textContent = message;
+        status.title = message;
+        status.classList.remove("d-none", "text-danger", "text-success", "text-muted");
+        status.classList.add(failed ? "text-danger" : saving ? "text-muted" : "text-success");
+    }
+}
+
 function saveDocument() {
     if (projectSaveInProgress) return;
     const canEditCurrentProject = projectEditSource === "alerts" ? canEditAlertProjects() : canEditProjects();
@@ -408,7 +495,7 @@ function saveDocument() {
     }
     const titleEl = document.getElementById("title");
     const title = titleEl ? titleEl.value.trim() : "";
-    
+
     if (!title) {
         alert("'2. Project Title' is a required field.");
         return;
@@ -426,9 +513,7 @@ function saveDocument() {
 
     if (editingId === null) {
         const required = [
-            ["biddingDate", "Date of Bidding"],
             ["approvedBudget", "Approved Budget for the Contract"],
-            ["winningBidder", "Winning Bidder"]
         ];
         for (const [id, label] of required) {
             const value = id === "biddingDate" ? getDateValue(id) : getValue(id);
@@ -446,8 +531,8 @@ function saveDocument() {
         }
     }
 
-    const statusValue = getValue("status") || "Pending";
-    const completionDate = getDateValue("completionDate");
+    const completionDate = getDateValue('completionDate');
+    const statusValue = automaticProjectFormStatus();
     if (editingId === null && statusValue.toLowerCase() === "completed" && !completionDate) {
         updateCompletionDateHint();
         document.getElementById("completionDate")?.focus();
@@ -457,7 +542,7 @@ function saveDocument() {
 
     const durationValue = getValue("contractDuration");
     if (durationValue !== "" && parseContractDuration(durationValue) === null) {
-        showSystemNotification("Contract duration must be a positive number of calendar days, such as 30 or 30.5.");
+        showSystemNotification("Contract duration must be a positive number of working days (Monday–Friday), such as 30 or 30.5.");
         document.getElementById("contractDuration")?.focus();
         return;
     }
@@ -486,6 +571,7 @@ function saveDocument() {
         resolutionNumber: getValue("resolutionNumber"),              // 10
         resolutionDate: getDateValue("resolutionDate"),              // 11
         noticePostQual: getDateValue("noticePostQual"),              // 12
+        noaDueDate: getDateValue("noaDueDate"),
         noa: getDateValue("noa"),                                    // 13
         performanceBond: getDateValue("performanceBond"),            // 14
         contractRef: getDateValue("contractRef"),                    // 15
@@ -497,17 +583,17 @@ function saveDocument() {
         preInspection: getDateValue("preInspection"),                // 20
         finalInspection: getDateValue("finalInspection"),            // 21
         swa: getValue("swa"),                                        // 22
-        
+
         // 23 Liquidated Damages subfields
         ldAmount: getValue("ldAmount"),
         ldNoOfDays: getValue("ldNoOfDays"),
         ldNewCompletionDate: getDateValue("ldNewCompletionDate"),
         ldActualDuration: getValue("ldActualDuration"),
-        
+
         completion: completionDate,                                    // 24
         status: statusValue,                                           // 25
         remarks: getValue("remarks"),                                // 26
-        
+
         updatedAt: new Date().toISOString()
     };
 
@@ -558,7 +644,8 @@ function showProjectDuplicateModal(existingRecord, newPayload) {
         { key: 'approvedBudget', label: 'Approved Budget' },
         { key: 'bidAmount', label: 'Bid Amount' },
         { key: 'prNumber', label: 'PR Number' },
-        { key: 'noa', label: 'NOA Date' },
+        { key: 'noaDueDate', label: 'NOA Due Date' },
+        { key: 'noa', label: 'NOA Issued Date' },
         { key: 'ntpDate', label: 'NTP Date' },
         { key: 'completion', label: 'Completion Date' },
         { key: 'remarks', label: 'Remarks' }
@@ -647,25 +734,27 @@ function addDocument(payload) {
         showSystemNotification("Your account is view-only.");
         return;
     }
-    projectSaveInProgress = true;
+    setProjectSaveState(true, "Saving project to the server…");
     payload.createdAt = new Date().toISOString();
     payload.timelineCompletedMarked = false;
     payload.timelineAlertsCompleted = [];
     const transaction = db.transaction(["projects"], "readwrite");
     const store = transaction.objectStore("projects");
-    
+
     store.add(payload);
     transaction.onerror = event => {
-        projectSaveInProgress = false;
-        showSystemNotification(event.target.error?.message || "Unable to add the project. Please try again.");
+        const message = event.target.error?.message || "Unable to add the project. Please try again.";
+        setProjectSaveState(false, `Save failed: ${message}`, true);
+        showSystemNotification(message);
     };
     transaction.oncomplete = () => {
-        projectSaveInProgress = false;
+        setProjectSaveState(false, `Saved: ${payload.title}`);
         showSystemNotification(`🎉 Project successfully added: "${payload.title}"`);
         resetFormAccess();
         loadDocuments();
-        
+
         switchWorkspace("documents");
+        checkForSharedProjectUpdates();
     };
 }
 
@@ -677,14 +766,14 @@ async function updateDocument(id, payload) {
         return;
     }
     if (!db || projectSaveInProgress) return;
-    projectSaveInProgress = true;
+    setProjectSaveState(true, "Saving project to the server…");
     const transaction = db.transaction(["projects"], "readonly");
     const projectStore = transaction.objectStore("projects");
     projectStore.get(id).onsuccess = async (e) => {
         const currentRecord = e.target.result;
         if (!currentRecord) {
-            projectSaveInProgress = false;
-            showSystemNotification("The project was not found. Refresh and try again.");
+            setProjectSaveState(false, "Save failed: this project no longer exists.", true);
+            showSystemNotification("The project was not found. Close the editor to load shared changes.");
             return;
         }
 
@@ -710,8 +799,13 @@ async function updateDocument(id, payload) {
             });
             const result = await response.json().catch(() => ({}));
             if (response.status === 401 && typeof showLogin === "function") showLogin("Your session has expired. Please sign in again.");
-            if (!response.ok || !result.ok) throw new Error(result.message || "Unable to save project changes.");
+            if (!response.ok || !result.ok) {
+                const error = new Error(result.message || "Unable to save project changes.");
+                error.status = response.status;
+                throw error;
+            }
             savedRecord = result.record;
+            setProjectSaveState(true, `Saved: ${payload.title}. Updating the view…`);
             if (typeof db.acceptRecord === "function") db.acceptRecord("projects", savedRecord);
             pendingProjectAttachmentFiles = [];
             pendingProjectAttachmentDeletes = new Set();
@@ -721,18 +815,26 @@ async function updateDocument(id, payload) {
             resetFormAccess({ silent: true, navigate: false });
             switchWorkspace(returnWorkspace);
             loadDocuments();
+            setProjectSaveState(false, `Saved: ${payload.title}`);
             showSystemNotification(`Project changes successfully saved: "${payload.title}"`);
         } catch (error) {
             if (savedRecord) {
                 const returnWorkspace = projectEditReturnWorkspace || "documents";
                 resetFormAccess({ silent: true, navigate: false });
                 switchWorkspace(returnWorkspace);
-                showSystemNotification("Project changes were saved, but the page could not refresh. Reload to see the latest records.");
+                setProjectSaveState(false, `Saved: ${payload.title}. View update pending.`);
+                showSharedUpdatesIndicator(true);
+                showSystemNotification("Project changes were saved. The view will update automatically when the connection returns.");
             } else {
-                showSystemNotification(error.message || "Unable to save project changes.");
+                const message = error.status === 409
+                    ? "Changes were not saved because this project changed elsewhere. Your draft is still open. Copy your changes, then cancel and reopen the project to review the latest version."
+                    : error.message || "Unable to save project changes.";
+                setProjectSaveState(false, `Save failed: ${message}`, true);
+                showSystemNotification(message);
             }
         } finally {
-            projectSaveInProgress = false;
+            setProjectSaveState(false);
+            checkForSharedProjectUpdates();
         }
     };
 }
@@ -754,7 +856,7 @@ function projectListFilters() {
     };
 }
 
-async function loadServerProjectPage() {
+async function loadServerProjectPage(silent = false) {
     const requestSequence = ++projectListRequestSequence;
     try {
         const result = await apiClient.listProjects(projectListFilters());
@@ -764,13 +866,15 @@ async function loadServerProjectPage() {
         projectListTotal = result.totalRecords || 0;
         projectListServerPaged = true;
         renderTablePage();
+        return true;
     } catch (error) {
         console.error("Unable to load the project page:", error);
         if (requestSequence === projectListRequestSequence && ["documents", "archive"].includes(activeWorkspace)) {
             const table = document.getElementById("documentTable");
-            if (table) table.innerHTML = '<tr class="projects-loading-row"><td colspan="7">Unable to load project records. Please try again.</td></tr>';
+            if (table) table.innerHTML = '<tr class="projects-loading-row"><td colspan="8">Unable to load project records. Please try again.</td></tr>';
         }
-        showSystemNotification(error.message || "Unable to load project records.");
+        if (!silent) showSystemNotification(error.message || "Unable to load project records.");
+        return false;
     }
 }
 
@@ -944,7 +1048,7 @@ function loadDocuments(skipServerRefresh = false) {
                     !isAlertResolved("noa-active") &&
                     checkNoaFifteenDayWindowAlert(
                         item.noa,
-                        item.status
+                        item.status, item
                     );
 
 
@@ -966,7 +1070,7 @@ function loadDocuments(skipServerRefresh = false) {
 
 
                 const isCompletionAlertActive =
-                    !isMilestoneDateCompleted(item.swa) &&
+                    !projectCalendarDate(item.swa) && String(item.status || "").trim().toLowerCase() !== "released" &&
                     !isAlertResolved("award-close") &&
                     !isAlertResolved("award-overdue") &&
                     checkFifteenDayWindowAlert(
@@ -1004,8 +1108,7 @@ function loadDocuments(skipServerRefresh = false) {
 
                 const isAwardingOverdue =
                     Boolean(awardingDateObj) &&
-                    !isMilestoneDateCompleted(item.swa) &&
-                    ["Completed", "Released"].includes(item.status) &&
+                    !projectCalendarDate(item.swa) && String(item.status || "").trim().toLowerCase() !== "released" &&
                     !isAlertResolved("award-overdue") &&
                     today >= awardingDateObj;
 
@@ -1245,38 +1348,7 @@ function renderTablePage() {
     };
 
 
-    const getStatusClass = (status) => {
-        const normalized =
-            (status || "Pending").trim().toLowerCase();
 
-        if (normalized === "completed") {
-            return "project-status-completed";
-        }
-
-        if (normalized === "released") {
-            return "project-status-released";
-        }
-
-        if (
-            normalized === "on-going bidding" ||
-            normalized === "on-bidding"
-        ) {
-            return "project-status-bidding";
-        }
-
-        if (normalized.includes("pre-inspection")) {
-            return "project-status-preinspection";
-        }
-
-        if (
-            normalized.includes("final-inspection") ||
-            normalized.includes("final inspection")
-        ) {
-            return "project-status-finalinspection";
-        }
-
-        return "project-status-pending";
-    };
 
 
     paginatedItems.forEach(doc => {
@@ -1292,7 +1364,7 @@ function renderTablePage() {
 
         const isCompletionAlertActive =
             !isMuted &&
-            !isMilestoneDateCompleted(doc.swa) &&
+            !projectCalendarDate(doc.swa) && String(doc.status || "").trim().toLowerCase() !== "released" &&
             !isAlertResolved(doc, "award-overdue") &&
             !isAlertResolved(doc, "award-close") &&
             checkFifteenDayWindowAlert(
@@ -1306,7 +1378,7 @@ function renderTablePage() {
             !isAlertResolved(doc, "noa-active") &&
             checkNoaFifteenDayWindowAlert(
                 doc.noa,
-                doc.status
+                doc.status, doc
             );
 
 
@@ -1379,8 +1451,7 @@ function renderTablePage() {
 
 const isAwardingOverdue =
     Boolean(awardingDateObj) &&
-    !isMilestoneDateCompleted(doc.swa) &&
-    ["Completed", "Released"].includes(doc.status) &&
+    !projectCalendarDate(doc.swa) && String(doc.status || "").trim().toLowerCase() !== "released" &&
     today >= awardingDateObj &&
     !isMuted &&
     !isAlertResolved(
@@ -1393,10 +1464,12 @@ const isAwardingOverdue =
            ROW STATE
            ===================================================== */
 
+        const milestoneAlerts = getProjectMilestoneAlerts(doc);
         let rowClass = "";
 
 
         if (
+            milestoneAlerts.some(alert => alert.type.endsWith("overdue")) ||
             isAwardingOverdue ||
             isCompletionAlertActive ||
             isMaterialOverdue ||
@@ -1406,7 +1479,7 @@ const isAwardingOverdue =
 
             rowClass = "table-danger";
 
-        } else if (isNoaAlertActive) {
+        } else if (milestoneAlerts.length > 0 || isNoaAlertActive) {
 
             rowClass = "table-warning";
 
@@ -1429,7 +1502,6 @@ const isAwardingOverdue =
            ALERT CHIPS
            ===================================================== */
 
-        const milestoneAlerts = getProjectMilestoneAlerts(doc);
         const alerts = milestoneAlerts.map(alert => `<span class="project-alert-chip ${alert.type.endsWith("overdue") ? "alert-danger" : "alert-warning"}">${escapeHtml(alert.label)}</span>`);
 
 
@@ -1441,7 +1513,7 @@ const isAwardingOverdue =
                 </span>
             `);
 
-        } else if (isNoaAlertActive) {
+        } else if (milestoneAlerts.length > 0 || isNoaAlertActive) {
 
             alerts.push(`
                 <span class="project-alert-chip alert-warning">
@@ -1524,27 +1596,6 @@ const isAwardingOverdue =
 
 
         /* =====================================================
-           RESOLVE BUTTON
-           ===================================================== */
-
-        const canMarkDone = canResolveTimelineAlerts() && getManualTimelineAlertOptions(doc).length > 0;
-
-
-        const markDoneButton =
-            canMarkDone
-                ? `
-                    <button
-                        type="button"
-                        onclick="promptTimelineMarkDoneAction(${doc.id})"
-                        class="btn btn-sm btn-outline-success"
-                    >
-                        Resolve
-                    </button>
-                `
-                : "";
-
-
-        /* =====================================================
            DISPLAY VALUES
            ===================================================== */
 
@@ -1609,6 +1660,7 @@ const isAwardingOverdue =
                     <div class="project-tertiary-text">
                         ${sourceOfFund}
                     </div>
+                    <div data-project-editors="${Number(doc.id)}" hidden></div>
 
                 </td>
 
@@ -1621,6 +1673,8 @@ const isAwardingOverdue =
 
                 </td>
 
+
+                <td><span class="project-date">${formatUIDate(doc.noaDueDate)}</span></td>
 
                 <td>
 
@@ -1692,7 +1746,6 @@ const isAwardingOverdue =
                         </button>
 
 
-                        ${markDoneButton}
 
 
                         ${canDelete ? `
@@ -1727,7 +1780,7 @@ const isAwardingOverdue =
                 <tr>
 
                     <td
-                        colspan="7"
+                        colspan="8"
                         class="text-center py-5 text-muted"
                     >
                         No records match the current search or filters.
@@ -1739,6 +1792,8 @@ const isAwardingOverdue =
 
 
     renderPaginationControls();
+    if (typeof renderProjectEditingIndicators === "function") renderProjectEditingIndicators();
+    if (typeof refreshProjectEditingPresence === "function") void refreshProjectEditingPresence();
 }
 
 
@@ -1891,7 +1946,7 @@ function viewProjectDetails(id, source = "", { openAlerts = false } = {}) {
                 </div>
 
 
-                <span class="project-details-status">
+                <span class="project-details-status ${getStatusClass(project.status)}">
                     ${value(project.status || "Pending")}
                 </span>
 
@@ -1910,7 +1965,7 @@ function viewProjectDetails(id, source = "", { openAlerts = false } = {}) {
 
                 <div class="project-detail-grid">
 
-                    
+
 
 
                     ${field(
@@ -1919,10 +1974,10 @@ function viewProjectDetails(id, source = "", { openAlerts = false } = {}) {
                     )}
 
 
-                    
 
 
-                    
+
+
 
 
                     ${field(
@@ -1999,7 +2054,8 @@ function viewProjectDetails(id, source = "", { openAlerts = false } = {}) {
 
 
                     ${field(
-                        "Notice of Award",
+                        "NOA Due Date", dateValue(project.noaDueDate))}
+                    ${field("NOA Issued Date",
                         dateValue(project.noa)
                     )}
 
@@ -2107,7 +2163,7 @@ function viewProjectDetails(id, source = "", { openAlerts = false } = {}) {
 
                     ${field(
                         "Operational Status",
-                        value(project.status)
+                        `<span class="project-status-badge ${getStatusClass(project.status)}">${value(project.status || "Pending")}</span>`
                     )}
 
                 </div>
@@ -2198,6 +2254,10 @@ function viewProjectDetails(id, source = "", { openAlerts = false } = {}) {
         const editButton = document.getElementById("projectDetailsEditButton");
         const openedFromNeedsAttention = source === "needs-attention";
         projectDetailsEditId = id;
+        const presence = document.getElementById("projectDetailsPresence");
+        if (presence) presence.dataset.projectEditors = String(id);
+        if (typeof renderProjectEditingIndicators === "function") renderProjectEditingIndicators();
+        if (typeof refreshProjectEditingPresence === "function") void refreshProjectEditingPresence();
         hideProjectAlertsDropdown();
         const alertsButton = document.getElementById("projectDetailsAlertsButton");
         if (alertsButton) { alertsButton.setAttribute("aria-expanded", "false"); alertsButton.textContent = "Alerts"; }
@@ -2259,6 +2319,25 @@ function printProjectDetails() {
         link.replaceWith(document.createTextNode(link.textContent || ""));
     });
 
+    printable.querySelectorAll(".project-detail-section").forEach(section => {
+        const label = section.querySelector(".project-detail-section-title")?.textContent.trim();
+        if (label === "Procurement and Award") section.classList.add("print-procurement");
+        if (label === "Liquidated Damages") section.classList.add("print-liquidated");
+    });
+    const shortLabels = {
+        "Liquidated Damages Amount": "Amount",
+        "Liquidated Damages Number of Days": "Number of days",
+        "Revised Completion Date After Liquidated Damages": "Revised completion date",
+        "Actual Duration After Liquidated Damages": "Actual duration",
+        "Department of Labor and Employment Clearance": "DOLE clearance",
+        "Statement of Work Accomplished Date": "SWA recorded date"
+    };
+    printable.querySelectorAll(".project-detail-label").forEach(label => {
+        const replacement = shortLabels[label.textContent.trim()];
+        if (replacement) label.textContent = replacement;
+    });
+    printable.querySelectorAll(".project-detail-remarks").forEach(remarks => remarks.textContent = remarks.textContent.trim());
+
     const title = heading?.textContent?.trim() || "Project details";
     const preparedAt = new Date().toLocaleString("en-PH", {
         dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Manila"
@@ -2281,45 +2360,55 @@ function printProjectDetails() {
     printWindow.document.write(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>${escapeHtml(title)} — Project summary</title>
 <style>
-@page { size: A4 portrait; margin: 10mm; }
+@page { size: A4 portrait; margin: 12mm; }
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
-body { width: 190mm; color: #222; background: #fff; font: 9pt/1.16 Arial, sans-serif; }
-.print-heading { margin-bottom: 3mm; padding-bottom: 2mm; border-bottom: 1px solid #555; }
-.print-heading-top { display: flex; align-items: center; gap: 3mm; }
-.print-logo { width: 12mm; height: 12mm; flex: none; object-fit: contain; }
-.print-office { display: block; font-size: 10pt; font-weight: 700; }
-.print-heading h1 { margin: 1mm 0; font-size: 13pt; line-height: 1.1; }
-.print-heading p, .print-notice { margin: 0; font-size: 8pt; }
-.print-notice { display: block; margin-top: 1mm; }
-.project-details-summary { display: flex; justify-content: space-between; gap: 3mm; margin-bottom: 3mm; break-inside: avoid; }
-.project-details-summary > div { min-width: 0; }
-.project-details-project-number, .project-details-contractor { font-size: 8pt; }
-.project-details-project-title { margin: 1mm 0; font-size: 11pt; line-height: 1.2; overflow-wrap: anywhere; }
-.project-details-status { flex: none; max-width: 35mm; font-size: 9pt; font-weight: 700; overflow-wrap: anywhere; }
-.project-detail-section { margin: 0 0 2mm; break-inside: avoid; page-break-inside: avoid; }
-.project-detail-section-title { margin: 0 0 1mm; padding: .7mm 0; border-bottom: 1px solid #bbb; font-size: 9pt; font-weight: 700; }
-.project-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.4mm 3mm; }
-.project-detail-due-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); }
-.project-detail-field { min-width: 0; break-inside: avoid; overflow-wrap: anywhere; }
-.project-detail-label { margin-bottom: .5mm; color: #444; font-size: 8pt; font-weight: 700; }
-.project-detail-value { white-space: normal; font-size: 9pt; }
-.project-detail-empty { color: #555; font-style: italic; }
-.project-detail-remarks { white-space: pre-line; overflow-wrap: anywhere; }
-.list-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1mm 3mm; }
-.list-group-item { min-width: 0; padding: 1mm 0; border-bottom: 1px solid #ddd; break-inside: avoid; overflow-wrap: anywhere; }
-.text-truncate { white-space: normal; overflow: visible; text-overflow: clip; }
-.small { font-size: 8pt; color: #555; }
-.print-footer { margin-top: 2mm; padding-top: 1mm; border-top: 1px solid #bbb; font-size: 8pt; }
-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-th, td { overflow-wrap: anywhere; padding: 1mm; border: 1px solid #bbb; }
-img { max-width: 100%; }
+body { width: 186mm; color: #182433; background: #fff; font: 10.5pt/1.35 Arial, sans-serif; }
+.print-heading { margin-bottom: 3mm; padding-bottom: 3mm; border-bottom: 1.5px solid #203b56; }
+.print-heading-top { display:flex; align-items:center; gap:4mm; }
+.print-logo { width:16mm; height:16mm; flex:none; object-fit:contain; }
+.print-office { display:block; font-size:10pt; font-weight:700; color:#334155; }
+.print-heading h1 { margin:1mm 0; font-size:20pt; line-height:1.15; color:#16324f; }
+.print-heading p { margin:0; font-size:8.5pt; color:#64748b; }
+.print-notice { display:block; margin-top:2mm; font-size:8pt; color:#64748b; }
+.project-details-summary { display:flex; justify-content:space-between; align-items:flex-start; gap:4mm; margin-bottom:3mm; padding:2.5mm 4mm; border-left:1.3mm solid #203b56; background:#f2f5f8; break-inside:avoid; }
+.project-details-summary > div { min-width:0; }
+.project-details-project-number { font-size:8.5pt; color:#526174; }
+.project-details-project-title { margin:1.5mm 0; font-size:13pt; line-height:1.3; font-weight:700; overflow-wrap:anywhere; }
+.project-details-contractor { font-size:9pt; color:#334155; }
+.project-details-status { flex:none; max-width:30mm; font-size:9pt; font-weight:700; border:1px solid #94a3b8; border-radius:3mm; padding:1mm 2.5mm; background:white; overflow-wrap:anywhere; }
+.project-status-badge { display:inline-block; padding:1mm 2mm; border:1px solid; border-radius:3mm; font-size:9pt; font-weight:700; }
+
+.project-status-pending { background:#fff7ed; color:#9a3412; border-color:#fed7aa; }
+.project-status-bidding { background:#eff6ff; color:#1d4ed8; border-color:#bfdbfe; }
+.project-status-preinspection { background:#ecfeff; color:#155e75; border-color:#a5f3fc; }
+.project-status-finalinspection { background:#f5f3ff; color:#6d28d9; border-color:#ddd6fe; }
+.project-status-completed { background:#f0fdf4; color:#166534; border-color:#bbf7d0; }
+.project-status-released { background:#f0fdfa; color:#115e59; border-color:#99f6e4; }
+.project-detail-section { margin:0 0 2mm; break-inside:avoid; page-break-inside:avoid; }
+.project-detail-section-title { margin:0 0 1.5mm; padding:1mm 0; border-bottom:1px solid #b9c5d1; color:#16324f; font-size:10pt; font-weight:700; }
+.project-detail-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1.8mm 5mm; }
+.project-detail-due-grid { grid-template-columns:repeat(3,minmax(0,1fr)); margin-bottom:1.8mm; }
+.print-procurement .project-detail-grid, .print-liquidated .project-detail-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.project-detail-field { min-width:0; break-inside:avoid; overflow-wrap:anywhere; }
+.project-detail-label { margin-bottom:.8mm; color:#526174; font-size:8.2pt; line-height:1.25; font-weight:400; }
+.project-detail-value { white-space:normal; font-size:10pt; line-height:1.3; font-weight:600; }
+.project-detail-empty { color:#75808c; font-weight:400; font-style:normal; }
+.project-detail-remarks { white-space:pre-line; overflow-wrap:anywhere; font-weight:400; }
+.list-group { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:2mm 4mm; }
+.list-group-item { min-width:0; padding:1.5mm 0; border-bottom:1px solid #dbe2e8; break-inside:avoid; overflow-wrap:anywhere; }
+.text-truncate { white-space:normal; overflow:visible; text-overflow:clip; }
+.small { font-size:8.5pt; color:#64748b; }
+.print-footer { margin-top:4mm; padding-top:2mm; border-top:1px solid #b9c5d1; font-size:8pt; color:#64748b; }
+table { width:100%; border-collapse:collapse; table-layout:fixed; }
+th,td { overflow-wrap:anywhere; padding:2mm; border:1px solid #cbd5e1; }
+img { max-width:100%; }
 @media print {
-    body { width: auto; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
-    button, .btn, nav, input, select, textarea, [role="button"] { display: none !important; }
-    h1, h3, h4 { break-after: avoid; }
-    tr, .project-detail-field { break-inside: avoid; }
-    a { color: inherit; text-decoration: none; }
+    body { width:auto; print-color-adjust:exact; -webkit-print-color-adjust:exact; }
+    button,.btn,nav,input,select,textarea,[role="button"] { display:none !important; }
+    h1,h3,h4 { break-after:avoid; }
+    tr,.project-detail-field { break-inside:avoid; }
+    a { color:inherit; text-decoration:none; }
 }
 </style></head><body>
 <header class="print-heading"><div class="print-heading-top"><img id="projectPrintLogo" class="print-logo" src="${escapeHtml(logoUrl)}" alt="LGU Laoag logo"><div><strong class="print-office">LGU Laoag - Office of Engineering</strong><h1>Project summary</h1><p>Prepared ${escapeHtml(preparedAt)}</p></div></div><div class="print-notice">Reference copy — Not an official document</div></header>
@@ -2360,7 +2449,7 @@ function renderPaginationControls() {
 
     const startItem = totalItems === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
     const endItem = Math.min(currentPage * itemsPerPage, totalItems);
-    
+
     const infoEl = document.getElementById("paginationInfo");
     if (infoEl) infoEl.textContent = `Showing ${startItem}-${endItem} of ${totalItems} entries`;
 
@@ -2375,7 +2464,7 @@ function renderPaginationControls() {
         previousPage = page;
     });
     navHtml += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}"><a class="page-link" href="#" onclick="changePage(${currentPage + 1})">Next</a></li></ul>`;
-    
+
     const controlsEl = document.getElementById("paginationControls");
     if (controlsEl) controlsEl.innerHTML = navHtml;
 }
@@ -2389,13 +2478,26 @@ function changePage(page) {
 }
 
 const inputFieldsList = [
-    "biddingDate", "title", "approvedBudget", "bidAmount", "winningBidder", 
-    "sourceOfFund", "sourceOfFundCustom", "prNumber", "prDate", "obre", "resolutionNumber", 
-    "resolutionDate", "noticePostQual", "noa", "performanceBond", "contractRef", 
-    "contractDuration", "ntpDate", "dole", "contractEndDate", "preInspection", "materialTestingDate", 
-    "finalInspection", "swa", "ldAmount", "ldNoOfDays", "ldNewCompletionDate", 
+    "biddingDate", "title", "approvedBudget", "bidAmount", "winningBidder",
+    "sourceOfFund", "sourceOfFundCustom", "prNumber", "prDate", "obre", "resolutionNumber",
+    "resolutionDate", "noticePostQual", "noaDueDate", "noa", "performanceBond", "contractRef",
+    "contractDuration", "ntpDate", "dole", "contractEndDate", "preInspection", "materialTestingDate",
+    "finalInspection", "swa", "ldAmount", "ldNoOfDays", "ldNewCompletionDate",
     "ldActualDuration", "completionDate", "remarks"
 ];
+
+function automaticProjectFormStatus() {
+    const value=id=>document.getElementById(id)?.value||'';
+    const current=value('status').toLowerCase();
+    if(projectCalendarDate(value('swa'))||current==='released') return 'Released';
+    if(projectCalendarDate(value('completionDate'))||current==='completed') return 'Completed';
+    if(projectCalendarDate(value('finalInspection'))) return 'Pending';
+    const project={biddingDate:value('biddingDate'),contractRef:value('contractRef'),contractDuration:value('contractDuration'),contractEndDate:value('contractEndDate')};
+    const end=getProjectMilestoneDates(project).contractDueDate;
+    if(end && timelineCalendarDay(new Date())>=end && !projectCalendarDate(value('finalInspection'))) return 'Final-inspection';
+    if(['preInspection','materialTestingDate','ntpDate'].every(id=>projectCalendarDate(value(id)))) return 'Pending';
+    return projectCalendarDate(value('biddingDate'))?'Pre-inspection':'On-going Bidding';
+}
 
 function updateCompletionDateHint() {
     const status = document.getElementById("status");
@@ -2403,6 +2505,7 @@ function updateCompletionDateHint() {
     const hint = document.getElementById("completionDateHint");
     if (!status || !completionDate || !hint) return;
 
+    status.value = automaticProjectFormStatus();
     const isCompleted = String(status.value || "").trim().toLowerCase() === "completed";
     const hasCompletionDate = Boolean(completionDate.value);
 
@@ -2431,7 +2534,7 @@ function updateSwaDueDate() {
 }
 
 function updateProjectMilestoneDates() {
-    const project = Object.fromEntries(["biddingDate", "ntpDate", "contractRef", "contractDuration", "contractEndDate", "ldNewCompletionDate"].map(id => [id, document.getElementById(id)?.value || ""]));
+    const project = Object.fromEntries(["noaDueDate", "biddingDate", "preInspection", "materialTestingDate", "finalInspection", "swa", "ntpDate", "contractRef", "contractDuration", "contractEndDate", "ldNewCompletionDate"].map(id => [id, document.getElementById(id)?.value || ""]));
     const dates = getProjectMilestoneDates(project);
     const contractEnd = document.getElementById("contractEndDate");
     const computed = Boolean(projectCalendarDate(project.contractRef) && parseContractDuration(project.contractDuration) !== null);
@@ -2548,12 +2651,13 @@ function initializeLiveValueTracking() {
         completionDate._swaDueDateHandler = updateSwaDueDate;
         completionDate.addEventListener("input", completionDate._swaDueDateHandler);
     }
-    ["biddingDate", "ntpDate", "contractRef", "contractDuration", "contractEndDate", "ldNewCompletionDate"].forEach(id => {
+    ["noaDueDate", "biddingDate", "preInspection", "materialTestingDate", "finalInspection", "swa", "ntpDate", "contractRef", "contractDuration", "contractEndDate", "ldNewCompletionDate"].forEach(id => {
         const input = document.getElementById(id);
         if (!input) return;
         for (const event of ["input", "change"]) {
             input.removeEventListener(event, updateProjectMilestoneDates);
             input.addEventListener(event, updateProjectMilestoneDates);
+            if(["biddingDate", "preInspection", "materialTestingDate", "finalInspection", "swa", "ntpDate", "contractRef", "contractDuration", "contractEndDate"].includes(id)) {input.removeEventListener(event, updateCompletionDateHint);input.addEventListener(event, updateCompletionDateHint);}
         }
     });
     updateProjectMilestoneDates();
@@ -2606,6 +2710,7 @@ function editDocument(id, source = "projects") {
 
         editingId = id;
         projectEditSnapshot = JSON.parse(JSON.stringify(doc));
+        if (typeof startProjectEditingPresence === "function") startProjectEditingPresence(id);
         hideNextProjectNumberPreview();
         pendingProjectAttachmentFiles = [];
         pendingProjectAttachmentDeletes = new Set();
@@ -2813,6 +2918,7 @@ function editDocument(id, source = "projects") {
             doc.noticePostQual
         );
 
+        setVal("noaDueDate", doc.noaDueDate);
         setVal(
             "noa",
             doc.noa
@@ -2970,6 +3076,7 @@ function editDocument(id, source = "projects") {
 
 
 function resetFormAccess(options = {}) {
+    if (projectSaveInProgress && !options.silent) return;
 
     const {
         silent = false,
@@ -2982,6 +3089,7 @@ function resetFormAccess(options = {}) {
         editingId !== null;
     const attachmentDraftProjectId = editingId;
     const returnWorkspace = projectEditReturnWorkspace || "documents";
+    if (typeof stopProjectEditingPresence === "function") void stopProjectEditingPresence();
     editingId = null;
     projectEditSnapshot = null;
     hideNextProjectNumberPreview();
@@ -3129,6 +3237,7 @@ function resetFormAccess(options = {}) {
     if (navigate) {
         switchWorkspace(returnWorkspace);
     }
+    if (typeof checkForSharedProjectUpdates === "function") checkForSharedProjectUpdates();
 }
 
 function deleteDocument(id) {
@@ -3171,6 +3280,7 @@ function deleteDocument(id) {
     transaction.oncomplete = () => {
 
         if (editingId === id) {
+            if (typeof stopProjectEditingPresence === "function") void stopProjectEditingPresence();
             editingId = null;
         }
 
@@ -3319,8 +3429,8 @@ async function showProjectAlertsDropdown(id, anchor) {
         if (sequence !== projectAlertDropdownSequence || projectAlertDropdownId !== id) return;
         const alerts = result.alerts || [];
         panel.innerHTML = `<div class="notification-panel-header"><div class="project-alert-dropdown-heading"><span class="notification-panel-title">Project alerts</span><button type="button" class="btn-close" aria-label="Close project alerts" onclick="hideProjectAlertsDropdown(true)"></button></div><span class="notification-panel-subtitle">Project no. ${escapeHtml(result.project.projectNo || "Not assigned")} · ${alerts.length} alert${alerts.length === 1 ? "" : "s"}</span></div><div class="notification-panel-body"><ul class="notification-list project-alerts-list list-unstyled mb-0">${alerts.length ? alerts.map(item => {
-            const manual = item.status === "Active" && canResolveTimelineAlerts() && isTimelineAlertManuallyResolvable(result.project, item.type);
-            const action = manual ? `<button type="button" class="btn btn-sm btn-outline-success" onclick="resolveProjectPanelAlert(${id}, '${escapeHtml(item.type)}')">Resolve</button>` : "";
+            const canEnterDate = item.status !== "Resolved" && canEditAlertProjects();
+            const action = canEnterDate ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="openProjectAlertEditor(${Number(id)})">Enter date</button>` : "";
             return `<li><div class="project-alert-dropdown-copy"><div class="project-alert-card-heading"><strong>${escapeHtml(item.label)}</strong><span class="project-alert-status ${item.status === "Active" ? "is-active" : item.status === "Resolved" ? "is-resolved" : "is-upcoming"}">${escapeHtml(item.status)}</span></div>${[item.dueDate ? `Due ${formatUIDate(item.dueDate)}` : "", item.doneDate ? `Completed ${formatUIDate(item.doneDate)}` : ""].filter(Boolean).map(value => `<span class="project-alert-date">${escapeHtml(value)}</span>`).join("")}</div>${action}</li>`;
         }).join("") : '<li class="text-muted">No alerts for this project.</li>'}</ul></div>`;
         positionProjectAlertsDropdown();
@@ -3361,10 +3471,17 @@ function toggleProjectAlertsPanel(event) {
     if (projectDetailsEditId) showProjectAlertsDropdown(projectDetailsEditId, document.getElementById("projectDetailsAlertsButton"));
 }
 
-function resolveProjectPanelAlert(id, type) {
+function openProjectAlertEditor(id) {
+    const projectId = Number(id);
+    if (!canEditAlertProjects() || !Number.isSafeInteger(projectId) || projectId <= 0) return;
     hideProjectAlertsDropdown();
-    bootstrap.Modal.getInstance(document.getElementById("projectDetailsModal"))?.hide();
-    invokeTimelineMarkDoneAction(id, type);
+    const details = document.getElementById("projectDetailsModal");
+    if (details?.classList.contains("show")) {
+        details.addEventListener("hidden.bs.modal", () => editDocument(projectId, "alerts"), { once: true });
+        bootstrap.Modal.getInstance(details)?.hide();
+    } else {
+        editDocument(projectId, "alerts");
+    }
 }
 
 document.addEventListener("click", event => {

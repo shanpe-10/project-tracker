@@ -43,12 +43,13 @@ function setAccountRequestsMessage(message) {
     messageBox.hidden = !message;
 }
 
-function addAccountAction(container, label, style, callback, disabled = false) {
+function addAccountAction(container, label, style, callback, disabled = false, disabledTitle = "") {
     const button = document.createElement("button");
     button.type = "button";
     button.className = `btn btn-sm ${style}`;
     button.textContent = label;
     button.disabled = disabled;
+    if (disabled) button.title = disabledTitle;
     button.onclick = callback;
     container.append(button);
 }
@@ -137,7 +138,7 @@ function buildPermissionPopover(account) {
         ["canExport", "Export Excel"],
         ["canDelete", "Delete projects"],
         ["canDeleteAll", "Delete all records"],
-        ["canResolveAlerts", "Mark/restore alerts"],
+        ["canResolveAlerts", "Restore historical alerts"],
         ["canArchive", "Archive projects"],
     ].forEach(([permission, label]) => {
         const option = document.createElement("label");
@@ -146,7 +147,18 @@ function buildPermissionPopover(account) {
         toggle.type = "checkbox";
         toggle.className = "form-check-input";
         toggle.checked = Boolean(account[permission]);
-        toggle.onchange = () => setUserPermission(account.id, permission, toggle.checked, account.username);
+        toggle.onchange = async () => {
+            const allowed = toggle.checked;
+            const toggles = panel.querySelectorAll('input[type="checkbox"]');
+            toggles.forEach(input => { input.disabled = true; });
+            try {
+                const saved = await setUserPermission(account.id, permission, allowed, account.username);
+                if (saved) account[permission] = allowed;
+                else toggle.checked = !allowed;
+            } finally {
+                toggles.forEach(input => { input.disabled = false; });
+            }
+        };
         option.append(toggle, document.createTextNode(` ${label}`));
         panel.append(option);
     });
@@ -172,7 +184,7 @@ async function loadAccountRequests() {
         if (!result.users.length) { setAccountRequestsMessage("There are no accounts."); loadAuditLog(); loadBackupSettings(); return; }
         setAccountRequestsMessage("");
         const summary = document.getElementById("accountDirectorySummary");
-        if (summary) summary.textContent = `${result.users.length} account${result.users.length === 1 ? "" : "s"} · ${window.pendingAccountRequests.length} pending approval`;
+        if (summary) summary.textContent = `${result.users.length} account${result.users.length === 1 ? "" : "s"}`;
         result.users.forEach(account => {
             const row = document.createElement("tr");
             const role = account.role === "superadmin" ? "Superadmin" : account.role === "admin" ? "Admin" : "Staff";
@@ -188,7 +200,7 @@ async function loadAccountRequests() {
             const initial = (account.fullName || account.username || "U").trim().charAt(0).toUpperCase();
             cell("Full name", "account-user-cell").innerHTML = `<span class="account-user-content"><span class="account-user-avatar">${account.profilePhoto ? `<img src="${account.profilePhoto}" alt="">` : escapeHtml(initial)}</span><span>${escapeHtml(account.fullName)}</span></span>`;
             cell("Username", "account-username").textContent = account.username;
-            cell("Role").innerHTML = `<span class="account-role-badge">${escapeHtml(role)}</span>`;
+            cell("Role").innerHTML = `<span class="account-role-badge">${escapeHtml(role)}</span>${account.isOriginalSuperadmin ? '<small class="d-block text-muted">Original account · protected</small>' : ""}`;
             cell("Status / access", "account-access-cell").innerHTML = `<span class="account-state ${account.active ? "is-active" : "is-pending"}">${account.active ? "Active" : "Pending approval"}</span><span class="account-access-summary">${escapeHtml(access)}</span>`;
             const created = new Date(account.createdAt);
             cell("Created", "account-created-cell").innerHTML = Number.isNaN(created.getTime()) ? "—" : `<span>${escapeHtml(created.toLocaleDateString("en-US", {timeZone:"Asia/Taipei",month:"short",day:"2-digit",year:"numeric"}))}</span><small>${escapeHtml(created.toLocaleTimeString("en-US", {timeZone:"Asia/Taipei",hour:"numeric",minute:"2-digit"}))}</small>`;
@@ -198,10 +210,10 @@ async function loadAccountRequests() {
             addAccountAction(actions, "Edit", "btn-outline-primary", () => openAccountEditor(account));
             if (!account.active) {
                 addAccountAction(actions, "Approve", "btn-success", () => reviewAccountRequest(account.id, "approve", account.username));
-                addAccountAction(actions, "Reject", "btn-outline-danger", () => reviewAccountRequest(account.id, "reject", account.username));
+                addAccountAction(actions, "Reject", "btn-outline-danger", () => reviewAccountRequest(account.id, "reject", account.username), account.isOriginalSuperadmin === true, "The original Superadmin account cannot be deleted.");
             } else {
                 if (account.role === "staff") addPermissionDropdown(actions, account);
-                addAccountAction(actions, "Delete", "btn-outline-danger", () => deleteStaffAccount(account.id, account.username), account.id === window.currentUser.id);
+                addAccountAction(actions, "Delete", "btn-outline-danger", () => deleteStaffAccount(account.id, account.username), account.isOriginalSuperadmin === true || account.id === window.currentUser.id, account.isOriginalSuperadmin ? "The original Superadmin account cannot be deleted." : "You cannot delete your signed-in account.");
             }
             list.append(row);
         });
@@ -238,6 +250,8 @@ function renderBackupSettings(result) {
     if (destination) destination.value = result.destination || defaultBackupDestination;
     updateBackupToggleLabel();
     if (status) status.textContent = result.latest ? `Latest: ${new Date(result.latest.createdAt).toLocaleString()} · ${formatBackupSize(result.latest.size)} · ${result.latest.name}` : "No backup has been created in this destination yet.";
+    const download = document.getElementById("downloadLatestBackup");
+    if (download) download.hidden = !(result.cloud && result.latest);
 }
 
 async function loadBackupSettings() {
@@ -462,10 +476,20 @@ async function setUserPermission(id, permission, allowed, username) {
         const result = await authRequest("setUserPermission", { id, permission, allowed });
         if (!result.ok) throw new Error(result.message || `Unable to update ${username}'s permission.`);
         showSystemNotification(result.message);
-        closePermissionPopovers();
-        // Rebuild dropdowns from saved permissions instead of stale account closures.
+        // Keep this panel and its checkboxes alive while refreshing the directory.
+        const panel = document.querySelector(`.permission-popover[data-account-id="${id}"]`);
+        if (panel) activePermissionButton = null;
         await loadAccountRequests();
-    } catch (error) { showSystemNotification(error.message); }
+        if (panel?.isConnected && document.querySelector(".permission-popover") === panel) {
+            activePermissionButton = document.querySelector(`.permission-dropdown-button[data-account-id="${id}"]`);
+            activePermissionButton?.setAttribute("aria-expanded", "true");
+            positionPermissionPopover();
+        }
+        return true;
+    } catch (error) {
+        showSystemNotification(error.message);
+        return false;
+    }
 }
 
 async function deleteStaffAccount(id, username) {
@@ -490,7 +514,7 @@ function openAccountEditor(account = null) {
         <label>Full name<input class="form-control" name="fullName" required maxlength="160"></label>
         <label>Username<input class="form-control" name="username" required pattern="[A-Za-z0-9._-]{3,80}" maxlength="80" autocomplete="off"></label>
         <label>Role<select class="form-select" name="role"><option value="staff">Staff</option><option value="admin">Admin</option><option value="superadmin">Superadmin</option></select></label>
-        <label>Password${account ? " (leave blank to keep current)" : ""}<input class="form-control" name="password" type="password" minlength="12" autocomplete="new-password" ${account ? "" : "required"}></label>
+        <label>Password${account ? " (leave blank to keep current)" : ""}<input class="form-control" name="password" type="password" minlength="12" autocomplete="new-password" aria-describedby="accountPasswordHint" ${account ? "" : "required"}><span id="accountPasswordHint" class="form-text d-block">At least 12 characters.</span></label>
         <label class="form-check"><input class="form-check-input" name="active" type="checkbox"> Active account</label>
         </div><p class="text-danger mt-3 mb-0" role="alert" data-account-error></p></div>
         <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save account</button></div>

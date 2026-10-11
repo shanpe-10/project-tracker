@@ -23,12 +23,18 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 
-# Local credentials, database files, backups, and runtime state
+# Pilot secrets and runtime files
 .env.*
 !.env.example
+!.env.render.example
 *secrets*.php
 *.sqlite
 *.sqlite3
 *.db
-/storage/app/backup-settings.json
+*.sql.gz
+*.dump
 /backups/
+/storage/app/*
+/storage/backups/
+/vendor/
+/node_modules/

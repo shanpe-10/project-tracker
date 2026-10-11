@@ -6,7 +6,7 @@ window.dbReady = false;
 
 const apiClient = {
     async request(url, options = {}) {
-        const response = await fetch(url, { credentials: "same-origin", ...options, headers: { "Content-Type": "application/json", "X-CSRF-Token": window.sessionCsrfToken || "", ...(options.headers || {}) } });
+        const response = await fetch(url, { credentials: "same-origin", cache: "no-store", ...options, headers: { "Content-Type": "application/json", "X-CSRF-Token": window.sessionCsrfToken || "", ...(options.headers || {}) } });
         const payload = await response.json().catch(() => ({}));
         if (response.status === 401) {
             window.sessionCsrfToken = "";
@@ -43,7 +43,9 @@ function createServerDatabase(seed) {
         history: new Map((seed.history || []).map(item => [String(item.id), item]))
     };
     let refreshSequence = 0, revision = 0;
+    let projectVersion = seed.version ?? null;
     return {
+        get projectVersion() { return projectVersion; },
         acceptRecord(name, record) {
             if (!records[name] || !record || record.id === undefined) return;
             records[name].set(String(record.id), clone(record));
@@ -54,12 +56,15 @@ function createServerDatabase(seed) {
             const sequence = ++refreshSequence, startedRevision = revision;
             const data = await apiClient.getBootstrap();
             // A late read must not replace a newer read or a committed local write.
-            if (sequence !== refreshSequence || startedRevision !== revision) return;
+            if (sequence !== refreshSequence || startedRevision !== revision) return false;
+            window.projectHolidayCalendar = data.holidayCalendar || window.projectHolidayCalendar;
             window.timelineDaySettings = data.timelineSettings || window.timelineDaySettings || {};
             ["projects", "history"].forEach(name => {
                 records[name].clear();
                 (data[name] || []).forEach(item => records[name].set(String(item.id), item));
             });
+            projectVersion = data.version ?? null;
+            return true;
         },
         transaction() {
             let pending = 0, completed = false, failed = false;
@@ -122,7 +127,8 @@ window.initializeDatabase = async function () {
     db = null; window.db = null; window.dbReady = false;
     try {
         const data = window.currentUser?.role === "superadmin" ? { projects: [], history: [], timelineSettings: {} } : await apiClient.getBootstrap();
-        window.timelineDaySettings = data.timelineSettings || {};
+        window.projectHolidayCalendar = data.holidayCalendar || window.projectHolidayCalendar;
+            window.timelineDaySettings = data.timelineSettings || {};
         db = createServerDatabase(data); window.db = db; window.dbReady = true;
         window.dispatchEvent(new Event("sharedDatabaseReady"));
     } catch (error) {

@@ -1,62 +1,60 @@
-const assert=require('node:assert/strict');
-const fs=require('node:fs');
-const path=require('node:path');
-const vm=require('node:vm');
-const nodes=new Map();
-const selected=[];
-const context=vm.createContext({console,setTimeout,clearTimeout,setInterval:()=>1,clearInterval(){},document:{addEventListener(){},getElementById:id=>nodes.get(id)||null,querySelectorAll:()=>selected},localStorage:{getItem:()=>null},URLSearchParams,Map,Set,Event,alert(){},confirm:()=>true,calls:[],notifications:[]});
-context.window=context;context.addEventListener=()=>{};
-for(const file of ['state','utils','db','projects','timeline'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../public/js/'+file+'.js'),'utf8'),context);
-context.currentUser={id:1,role:'admin'};
-context.loadDocuments=()=>{};context.showSystemNotification=message=>context.notifications.push(message);
-context.updateDashboardAlertScrollLimit=()=>{};
-context.apiClient.post=async(action,body)=>{context.calls.push({action,body});return {ok:true,record:{...body.record,updatedAt:'new-version'}};};
-const pause=()=>new Promise(resolve=>setTimeout(resolve,30));
-const fields=['pre-inspection','pre-inspection-overdue','ntp-due','ntp-due-overdue','material-test','material-overdue','final-inspection','final-inspection-overdue','award-close','award-overdue'];
-const checkbox=(id,type)=>({checked:true,getAttribute:key=>key==='data-project-id'?String(id):type});
-async function run(){
-    for(const type of fields)assert.equal(context.isTimelineAlertManuallyResolvable({},type),false,type);
-    for(const type of ['noa-warning','noa-active','noa-overdue'])assert(context.isTimelineAlertManuallyResolvable({biddingDate:'2020-01-01'},type));
-    for(const type of ['ntp-award','ntp-overdue']){
-        assert(context.isTimelineAlertManuallyResolvable({},type));
-        assert.equal(context.isTimelineAlertManuallyResolvable({biddingDate:'2020-01-01'},type),false);
-    }
-    const types=(project,day)=>Array.from(context.getManualTimelineAlertOptions(project,day),item=>item.type);
-    assert.deepEqual(types({noa:'2026-10-05'},'2026-10-04'),['noa-warning']);
-    assert.deepEqual(types({noa:'2026-10-05'},'2026-10-05'),[]);
-    assert.deepEqual(types({noa:'2026-10-05'},'2026-10-16'),[]);
-    assert.deepEqual(types({noa:'2026-10-05',timelineAlertsCompleted:['noa-overdue']},'2026-10-16'),[]);
-    assert.deepEqual(types({ntpDate:'2026-10-05'},'2026-10-05'),[]);
-    assert.deepEqual(types({ntpDate:'2026-10-05'},'2026-11-05'),[]);
-    assert.deepEqual(types({ntpDate:'2026-10-05',biddingDate:'2026-09-01'},'2026-10-05'),[]);
-    for(const state of [{archivedAt:'2026-10-01'},{timelineCompletedMarked:true},{status:'Completed'},{status:'Released'}])assert.deepEqual(types({noa:'2020-01-01',...state},'2026-10-05'),[]);
-    vm.runInContext('db=createServerDatabase({projects:[{id:1,title:"Dated",biddingDate:"2020-01-01",updatedAt:"old"},{id:2,title:"Legacy",updatedAt:"old"}],history:[]})',context);
-    for(const type of [...fields,'ntp-overdue'])context.invokeTimelineMarkDoneAction(1,type);
-    await pause();assert.equal(context.calls.length,0);assert(context.notifications.some(message=>message.includes('actual milestone date')));
-    context.invokeTimelineMarkDoneAction(1,'noa-overdue');await pause();assert.equal(context.calls.length,1);
-    context.invokeTimelineMarkDoneAction(2,'ntp-overdue');await pause();assert.equal(context.calls.length,2);
-    const originalPrompt=context.promptTimelineMarkDoneAction;let prompted=0;context.promptTimelineMarkDoneAction=()=>prompted++;
-    context.invokeTimelineMarkDoneAction(1);await pause();assert.equal(prompted,1);assert.equal(context.calls.length,2);context.promptTimelineMarkDoneAction=originalPrompt;
-    selected.push(checkbox(1,'final-inspection'),checkbox(1,'noa-active'),checkbox(2,'material-overdue'));
-    context.executeDashboardBulkMarkDone();await pause();assert.equal(context.calls.length,3);
-    assert.deepEqual(Array.from(context.calls[2].body.record.timelineAlertsCompleted),['noa-overdue','noa-active']);
-    assert(!context.calls[2].body.history.details.includes('final-inspection'));
-    selected.length=0;
-    const makeNode=()=>({value:'',innerHTML:'',textContent:'',classList:{values:new Set(),toggle(name,on){if(on)this.values.add(name);else this.values.delete(name);},add(name){this.values.add(name);},remove(name){this.values.delete(name);},replace(old,newName){this.values.delete(old);this.values.add(newName);}}});
-    for(const id of ['dashboardNotificationList','dashboardSelectAllBar','dashboardBulkDoneBtn','dashboardMasterCheck','dashboardSelectCount'])nodes.set(id,makeNode());
-    const dated={id:1,title:'Dated',status:'Pending',biddingDate:'2020-01-01'};
-    vm.runInContext('activeDashboardAlertsData = []',context);
-    context.input=[{type:'final-inspection',label:'Final Inspection Due',dueDate:'2030-01-01',project:dated}];
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const nodes = new Map();
+const context = vm.createContext({console, setTimeout, clearTimeout, setInterval:()=>1, clearInterval(){},
+    document:{addEventListener(){},getElementById:id=>nodes.get(id)||null,querySelectorAll:()=>[]},
+    localStorage:{getItem:()=>null},URLSearchParams,Map,Set,Event,alert(){},confirm:()=>true,calls:[],notifications:[]});
+context.window = context;
+context.addEventListener = ()=>{};
+for (const file of ['state','utils','db','projects','timeline']) vm.runInContext(fs.readFileSync(path.join(__dirname,'../public/js/'+file+'.js'),'utf8'), context);
+context.currentUser = {id:1,role:'admin',canEdit:true,canResolveAlerts:true};
+context.loadDocuments = ()=>{};
+context.showSystemNotification = message=>context.notifications.push(message);
+context.updateDashboardAlertScrollLimit = ()=>{};
+context.apiClient.post = async(action, body)=>{context.calls.push({action,body});return {ok:true,record:{...body.record,updatedAt:'new-version'}};};
+const pause = ()=>new Promise(resolve=>setTimeout(resolve,30));
+
+async function run() {
+    for (const name of ['invokeTimelineMarkDoneAction','promptTimelineMarkDoneAction','executeDashboardBulkMarkDone','getManualTimelineAlertOptions']) assert.equal(typeof context[name], 'undefined');
+    const blade = fs.readFileSync(path.join(__dirname,'../resources/views/tracker.blade.php'),'utf8');
+    assert(!/mark\s+(?:selected\s+)?done/i.test(blade));
+    assert(!blade.includes('dashboardBulkDoneBtn'));
+    assert(!blade.includes('timelineMarkDoneModal'));
+    const due = {noa:'2026-10-09',preInspection:'2026-10-09',ntpDate:'2026-10-09',materialTestingDate:'2026-10-09',finalInspection:'2026-10-09',swa:'2026-10-09'};
+    const resolutions = context.getAutomaticTimelineResolutions(due, '2026-10-10');
+    const aliases = Array.from(resolutions).flatMap(item=>Array.from(item.aliases));
+    for (const type of ['noa-warning','noa-overdue','ntp-award','ntp-overdue','pre-inspection-overdue','material-overdue','final-inspection-overdue','award-overdue']) assert(aliases.includes(type), type);
+    assert.equal(context.getAutomaticTimelineResolutions(due,'2026-10-08').length,0);
+
+    // Historical flags can be reopened; an automatically resolved alert requires a date correction.
+    vm.runInContext('db=createServerDatabase({projects:[{id:1,title:"Historical",timelineAlertsCompleted:["noa-overdue","ntp-overdue"],updatedAt:"old"},{id:2,title:"Dated",noa:"2020-01-01",updatedAt:"old"}],history:[]})',context);
+    context.invokeTimelineUnmarkDoneAction(1,'noa-overdue');
+    await pause();
+    assert.equal(context.calls.length,1);
+    assert.equal(context.calls[0].action,'saveTimelineRecord');
+    assert.deepEqual(Array.from(context.calls[0].body.record.timelineAlertsCompleted),['ntp-overdue']);
+    context.invokeTimelineUnmarkDoneAction(2,'noa-overdue');
+    await pause();
+    assert.equal(context.calls.length,1);
+    assert(context.notifications.some(message=>message.includes('actual milestone date')));
+    context.currentUser = {id:1,role:'staff',canResolveAlerts:false};
+    context.invokeTimelineUnmarkDoneAction(1,'ntp-overdue');
+    await pause();
+    assert.equal(context.calls.length,1);
+    assert(context.notifications.some(message=>message.includes('permission')));
+
+    // Dashboard alerts remain grouped and navigate to details, with no completion checkboxes.
+    nodes.set('dashboardNotificationList',{innerHTML:''});
+    context.input = [{type:'noa-overdue',label:'NOA Overdue',project:{id:3,title:'Road'}},{type:'final-inspection',label:'Final Inspection Due',project:{id:3,title:'Road'}}];
     vm.runInContext('activeDashboardAlertsData=input;filterDashboardAlertsList()',context);
-    let html=nodes.get('dashboardNotificationList').innerHTML;
-    assert(!html.includes('Mark Done'));assert(!html.includes('dashboard-item-checkbox'));assert(html.includes('>Alerts</button>'));
-    assert(nodes.get('dashboardBulkDoneBtn').classList.values.has('d-none'));
-    context.input.push({type:'noa-overdue',label:'NOA Overdue',project:dated});
-    vm.runInContext('filterDashboardAlertsList()',context);html=nodes.get('dashboardNotificationList').innerHTML;
+    const html = nodes.get('dashboardNotificationList').innerHTML;
     assert.equal((html.match(/dashboard-project-alert-row/g)||[]).length,1);
-    assert(html.includes('2 alerts'));assert(html.includes('>Alerts</button>'));
-    context.currentUser={role:'viewer'};vm.runInContext('filterDashboardAlertsList()',context);
-    html=nodes.get('dashboardNotificationList').innerHTML;assert(!html.includes('Mark Done'));assert(!html.includes('Enter date'));assert(!html.includes('dashboard-item-checkbox'));
-    console.log('Limited manual resolution passed: individual, menu, bulk, mixed rows, global bypass, NOA/legacy NTP and viewer permissions.');
+    assert(html.includes('2 alerts'));
+    assert(html.includes('>Alerts</button>'));
+    assert(!html.includes('checkbox'));
+    assert(!/mark\s+done/i.test(html));
+    console.log('Date-based resolution, historical restore, permissions and grouped dashboard checks passed.');
 }
 run().catch(error=>{console.error(error);process.exitCode=1;});

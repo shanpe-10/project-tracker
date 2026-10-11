@@ -6,15 +6,18 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\Process\Process;
+use App\Support\TrackerMediaStore;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TrackerBackupController extends Controller
 {
-    public function handle(Request $request): JsonResponse
+    public function handle(Request $request): JsonResponse|StreamedResponse
     {
         $user = (array) $request->session()->get('tracker_user');
         if (($user['role'] ?? '') !== 'admin') {
             return response()->json(['ok' => false, 'message' => 'Only administrators can manage backups.'], 403);
         }
+        if (TrackerMediaStore::cloud()) return $this->handleCloud($request, $user);
         $settingsPath = storage_path('app/backup-settings.json');
         $default = storage_path('backups');
         $settings = $this->settings($settingsPath, $default);
@@ -109,6 +112,7 @@ class TrackerBackupController extends Controller
 
     public function runScheduledBackup(): ?string
     {
+        if (TrackerMediaStore::cloud()) return $this->createCloudBackup(false);
         $settings = $this->settings(storage_path('app/backup-settings.json'), storage_path('backups'));
         if (! $settings['enabled']) {
             return null;
@@ -122,6 +126,113 @@ class TrackerBackupController extends Controller
 
         return $archive;
     }
+    private function cloudValue(string $key): array
+    {
+        $value = DB::table('application_settings')->where('setting_key', $key)->value('setting_value');
+        return $value === null ? [] : json_decode($value, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    private function cloudPayload(): array
+    {
+        $archives = $this->cloudValue('cloud_project_backups')['archives'] ?? [];
+        $latest = $archives[0] ?? null;
+        if ($latest) $latest['downloadUrl'] = 'api/backups.php?action=downloadLatest';
+        return ['ok'=>true, 'cloud'=>true, 'enabled'=>(bool)($this->cloudValue('cloud_backup_settings')['enabled'] ?? true),
+            'destination'=>'Private cloud storage', 'defaultDestination'=>'Private cloud storage', 'latest'=>$latest];
+    }
+
+    private function handleCloud(Request $request, array $user): JsonResponse|StreamedResponse
+    {
+        if ($request->isMethod('get')) {
+            if ($request->query('action') !== 'downloadLatest') return response()->json($this->cloudPayload());
+            $latest = $this->cloudPayload()['latest'];
+            if (! $latest || ! TrackerMediaStore::disk()->exists($latest['key'])) return response()->json(['ok'=>false,'message'=>'No backup is available.'],404);
+            return TrackerMediaStore::disk()->response($latest['key'], $latest['name'],
+                ['Content-Type'=>'application/zip','Cache-Control'=>'private, no-store','X-Content-Type-Options'=>'nosniff'], 'attachment');
+        }
+        $request->validate(['action'=>['sometimes','nullable','string']]);
+        $action = (string) $request->input('action');
+        if ($action === 'runManual') {
+            try { $this->createCloudBackup(true); }
+            catch (\DomainException $error) { return response()->json(['ok'=>false,'message'=>$error->getMessage()],409); }
+            catch (\Throwable $error) { report($error); return response()->json(['ok'=>false,'message'=>'The backup could not be saved. Check storage access and available space, then try again.'],500); }
+            $this->audit($user, 'backup.manual_created', 'Created a manual project-data backup in private cloud storage.');
+            return response()->json($this->cloudPayload());
+        }
+        if ($action === 'browseDestination') return response()->json(['ok'=>false,'message'=>'Cloud backups use private storage. A Windows folder is not required.'],422);
+        if (! in_array($action, ['', 'saveSettings'], true)) return response()->json(['ok'=>false,'message'=>'Unsupported backup request.'],400);
+        $request->validate(['enabled'=>['required','boolean']]);
+        DB::table('application_settings')->updateOrInsert(['setting_key'=>'cloud_backup_settings'],
+            ['setting_value'=>json_encode(['enabled'=>$request->boolean('enabled')]), 'updated_by'=>$user['id']]);
+        $this->audit($user, 'backup.settings_updated', 'Updated cloud backup settings.');
+        return response()->json($this->cloudPayload());
+    }
+
+    /** Retain the latest snapshot of seven days, four weeks and three months. */
+    private function retainedCloudArchives(array $archives): array
+    {
+        usort($archives, fn ($a, $b) => strcmp($b['createdAt'], $a['createdAt']));
+        $groups = ['day'=>[], 'week'=>[], 'month'=>[]];
+        $limits = ['day'=>7, 'week'=>4, 'month'=>3];
+        $retained = [];
+        foreach ($archives as $archive) {
+            $keep = false;
+            $date = \Carbon\CarbonImmutable::parse($archive['createdAt'])->setTimezone('Asia/Taipei');
+            foreach (['day'=>'Y-m-d','week'=>'o-W','month'=>'Y-m'] as $period=>$format) {
+                $key = $date->format($format);
+                if (! isset($groups[$period][$key]) && count($groups[$period]) < $limits[$period]) {
+                    $groups[$period][$key] = true;
+                    $keep = true;
+                }
+            }
+            if ($keep) $retained[] = $archive;
+        }
+        return $retained;
+    }
+
+    private function createCloudBackup(bool $manual): ?string
+    {
+        $locked = DB::selectOne('SELECT pg_try_advisory_lock(hashtext(?)) AS locked', ['tracker:cloud-backup'])->locked;
+        if (! $locked) {
+            if ($manual) throw new \DomainException('A backup is already being created. Try again after it finishes.');
+            return null;
+        }
+        $destination = null;
+        try {
+            $payload = $this->cloudPayload();
+            if (! $manual && (! $payload['enabled'] || ($payload['latest'] && now('Asia/Taipei')->isSameDay(\Carbon\CarbonImmutable::parse($payload['latest']['createdAt'])->setTimezone('Asia/Taipei'))))) return null;
+            $destination = storage_path('app/cloud-backup-'.bin2hex(random_bytes(8)));
+            $archive = $this->createBackup($destination);
+            $key = 'backups/daily/'.basename($archive);
+            $stream = fopen($archive, 'rb');
+            try {
+                if ($stream === false || ! TrackerMediaStore::disk()->put($key, $stream, ['ContentType'=>'application/zip'])) throw new \RuntimeException('Unable to store the backup.');
+            } finally { if (is_resource($stream)) fclose($stream); }
+            try {
+                if (! TrackerMediaStore::disk()->put($key.'.sha256', file_get_contents($archive.'.sha256'))) throw new \RuntimeException('Unable to store the checksum.');
+                $previous = $this->cloudValue('cloud_project_backups')['archives'] ?? [];
+                $all = array_merge([['key'=>$key,'name'=>basename($archive),'size'=>filesize($archive),'createdAt'=>now('UTC')->toIso8601String()]], $previous);
+                $retained = $this->retainedCloudArchives($all);
+                DB::table('application_settings')->updateOrInsert(['setting_key'=>'cloud_project_backups'], ['setting_value'=>json_encode(['archives'=>$retained],JSON_THROW_ON_ERROR)]);
+            } catch (\Throwable $error) {
+                try { TrackerMediaStore::disk()->delete([$key,$key.'.sha256']); } catch (\Throwable $cleanupError) { report($cleanupError); }
+                throw $error;
+            }
+            $keys = array_column($retained, 'key');
+            foreach ($all as $item) {
+                if (! in_array($item['key'], $keys, true)) {
+                    try { TrackerMediaStore::disk()->delete([$item['key'],$item['key'].'.sha256']); } catch (\Throwable $cleanupError) { report($cleanupError); }
+                }
+            }
+            if (! $manual) DB::table('audit_log')->insert(['actor_id'=>null,'actor_username'=>'system','action'=>'backup.automatic_created','entity_type'=>'backup','summary'=>'Created an automatic cloud project-data backup.','created_at'=>now()]);
+            return $key;
+        } finally {
+            // Only this invocation's generated, isolated staging folder is removed.
+            if ($destination !== null) \Illuminate\Support\Facades\File::deleteDirectory($destination);
+            DB::select('SELECT pg_advisory_unlock(hashtext(?))', ['tracker:cloud-backup']);
+        }
+    }
+
     private function settings(string $path, string $default): array
     {
         $saved = is_file($path) ? json_decode((string) file_get_contents($path), true) : [];
@@ -160,6 +271,7 @@ class TrackerBackupController extends Controller
         $workbook = $work.DIRECTORY_SEPARATOR.'all-projects.xlsx';
         $archive = $daily.DIRECTORY_SEPARATOR.'project-data-'.$stamp.'.zip';
         $complete = false;
+        $mediaTemps = [];
         try {
             $connection = DB::connection()->getConfig();
             if ($connection['driver'] !== 'pgsql') throw new \RuntimeException('Backups require PostgreSQL.');
@@ -188,18 +300,43 @@ class TrackerBackupController extends Controller
             $zip->addFile($sql, 'database.sql');
             $this->createProjectsWorkbook($workbook);
             $zip->addFile($workbook, 'exports/all-projects.xlsx');
-            $this->addMediaFiles($zip, (string)config('tracker.attachments'), 'attachments');
+            if (TrackerMediaStore::cloud()) {
+                // Fetch only media referenced by this pilot's projects; no bucket-wide scan.
+                DB::table('projects')->select('id', 'data')->orderBy('id')->each(function ($row) use ($zip, $work, &$mediaTemps): void {
+                    $project = json_decode($row->data, true) ?: [];
+                    foreach ($project['attachments'] ?? [] as $attachment) {
+                        $name = basename((string) ($attachment['storedName'] ?? ''));
+                        if ($name === '') continue;
+                        $key = 'attachments/'.$row->id.'/'.$name;
+                        $stream = TrackerMediaStore::disk()->readStream($key);
+                        if (! is_resource($stream)) throw new \RuntimeException('An attachment could not be included in the backup.');
+                        $temporary = $work.'/media-'.bin2hex(random_bytes(8));
+                        $mediaTemps[] = $temporary;
+                        $output = fopen($temporary, 'wb');
+                        try {
+                            if ($output === false || stream_copy_to_stream($stream, $output) === false) throw new \RuntimeException('Unable to stage a backup attachment.');
+                        } finally { fclose($stream); if (is_resource($output)) fclose($output); }
+                        if (! $zip->addFile($temporary, $key)) throw new \RuntimeException('Unable to add a backup attachment.');
+                    }
+                });
+            } else {
+                $this->addMediaFiles($zip, (string)config('tracker.attachments'), 'attachments');
+            }
             $zip->addFromString('README.txt', "Project-data backup\r\nContains project records, history, numbering, an Excel export and project attachments.\r\nIt excludes application code, user accounts/passwords, profile photos and system settings.\r\nRestore database.sql into a compatible tracker schema with the original user IDs/accounts present; it is a data-only dump, not a fresh system installation. Existing project rows must be handled before restoring to avoid duplicate IDs.\r\nRestore attachments into the configured project attachment directory. The spreadsheet can also be loaded through the existing import preview.\r\n");
             if (! $zip->close()) {
                 throw new \RuntimeException('Unable to finish the backup archive.');
             }
             if (file_put_contents($archive.'.sha256', hash_file('sha256', $archive).'  '.basename($archive).PHP_EOL) === false) throw new \RuntimeException('Unable to write backup checksum.');
             $complete = true;
-            $this->createRotationCopy($archive, $destination, 'weekly', now('Asia/Taipei')->format('o-W'));
-            $this->createRotationCopy($archive, $destination, 'monthly', now('Asia/Taipei')->format('Y-m'));
+            if (! TrackerMediaStore::cloud()) {
+                $this->createRotationCopy($archive, $destination, 'weekly', now('Asia/Taipei')->format('o-W'));
+                $this->createRotationCopy($archive, $destination, 'monthly', now('Asia/Taipei')->format('Y-m'));
+            }
 
             return $archive;
         } finally {
+            if (isset($zip) && ! $complete) { try { $zip->close(); } catch (\Throwable $ignored) {} }
+            foreach ($mediaTemps as $temporary) @unlink($temporary);
             @unlink($defaults);
             @unlink($sql);
             @unlink($workbook);
@@ -236,7 +373,7 @@ class TrackerBackupController extends Controller
             'preInspection' => 'Pre Inspection', 'finalInspection' => 'Final Inspection', 'swa' => 'SWA', 'ldAmount' => 'LD Amount',
             'ldNoOfDays' => 'LD Days', 'ldNewCompletionDate' => 'Extended Completion Date',
             'ldActualDuration' => 'Actual Construction Duration', 'completion' => 'Completion Date',
-            'status' => 'Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'archivedAt' => 'Archived At', 'archivedBy' => 'Archived By',
+            'status' => 'Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date', 'archivedAt' => 'Archived At', 'archivedBy' => 'Archived By',
         ];
         $rows = [array_values($columns)];
         DB::table('projects')->select('data', 'archived_at')

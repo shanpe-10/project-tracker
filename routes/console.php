@@ -81,6 +81,36 @@ Artisan::command('tracker:create-superadmin', function () {
     return 0;
 })->purpose('Create the first tracker Superadmin on a new installation');
 
-Schedule::command('tracker:backup')
-    ->dailyAt('02:00')
-    ->timezone('Asia/Taipei');
+$backupSchedule = Schedule::command('tracker:backup')->timezone('Asia/Taipei')->withoutOverlapping(20);
+if (config('tracker.cloud')) $backupSchedule->hourlyAt(5);
+else $backupSchedule->dailyAt('02:00');
+
+
+Artisan::command('tracker:holidays-sync {--force : Check now even if already checked today or disabled}', function () {
+    try {
+        $result = \App\Support\TrackerHolidays::sync((bool)$this->option('force'));
+        $this->info('Holiday calendar checked. Last success: '.($result['state']['lastSuccess'] ?? 'not yet synced'));
+        return 0;
+    } catch (\Throwable $error) { $this->error($error->getMessage()); return 1; }
+})->purpose('Sync declared national Philippine non-working holidays from the official PCO feed');
+
+Schedule::command('tracker:holidays-sync')->hourlyAt(0)->timezone('Asia/Manila')->withoutOverlapping(20)
+    ->when(fn () => now('Asia/Manila')->hour >= 3);
+
+Artisan::command('tracker:project-status-sync', function () {
+    $changed=0;
+    DB::table('projects')->whereNull('archived_at')->select('id')->orderBy('id')->chunkById(200,function($rows)use(&$changed){
+        foreach($rows as $item) DB::transaction(function()use($item,&$changed){
+            $row=DB::table('projects')->where('id',$item->id)->lockForUpdate()->first();if(!$row)return;
+            $record=json_decode($row->data,true)?:[];
+            $status=\App\Support\TrackerProjectInput::automaticStatus($record);
+            if(($record['status']??'')===$status)return;
+            $record['status']=$status;$record['updatedAt']=now('UTC')->format('Y-m-d\TH:i:s.v\Z');
+            DB::table('projects')->where('id',$row->id)->update(['data'=>json_encode($record,JSON_UNESCAPED_UNICODE),'project_status'=>$status,'updated_at'=>now()]);
+            DB::table('audit_log')->insert(['actor_id'=>null,'actor_username'=>'System','action'=>'project.status.auto','entity_type'=>'project','entity_id'=>$row->id,'summary'=>'Automatically changed status to '.$status.'.','created_at'=>now()]);
+            $changed++;
+        });
+    });
+    $this->info('Updated '.$changed.' project statuses.');
+});
+Schedule::command('tracker:project-status-sync')->everyMinute()->withoutOverlapping(5);

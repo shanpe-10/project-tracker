@@ -170,7 +170,7 @@ class RequestedUpdatesTest extends TestCase
         $this->api(['action'=>'listAuditLog'],'auth.php')->assertOk();
         $this->withSession($this->session)->getJson('/api/backups.php')->assertOk();
         $this->api(['action'=>'saveTimelineSettings','settings'=>['noa'=>10,'ntp'=>30,'material'=>15,'completion'=>15,'finalInspection'=>30,'bidding'=>15]])->assertOk()->assertJsonPath('settings.finalInspection',30);
-        $this->api(['action'=>'saveTimelineRecord','record'=>array_replace($record,['timelineAlertsCompleted'=>['noa-overdue']]),'history'=>['projectId'=>$record['id'],'action'=>'timeline-mark-done','details'=>'Resolved']])->assertOk();
+        $this->api(['action'=>'saveTimelineRecord','record'=>array_replace($record,['timelineAlertsCompleted'=>['noa-overdue']]),'history'=>['projectId'=>$record['id'],'action'=>'timeline-mark-done','details'=>'Resolved']])->assertUnprocessable();
     }
 
     public function test_admin_can_delete_and_clear_projects_without_staff_permission_grants(): void

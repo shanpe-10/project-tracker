@@ -19,14 +19,14 @@ final class FormattedProjectExport
         'performanceBond', 'contractRef', 'contractDuration', 'ntpDate',
         'dole', 'contractEndDate', 'preInspection', 'finalInspection',
         'swa', 'ldAmount', 'ldNoOfDays', 'ldNewCompletionDate',
-        'ldActualDuration', 'completion', 'status', 'remarks', 'materialTestingDate',
+        'ldActualDuration', 'completion', 'status', 'remarks', 'materialTestingDate', 'noaDueDate',
     ];
 
     private const DATES = [
         'biddingDate', 'prDate', 'obre', 'resolutionDate', 'noticePostQual',
         'noa', 'performanceBond', 'contractRef', 'ntpDate', 'dole',
         'contractEndDate', 'preInspection', 'finalInspection', 'swa',
-        'ldNewCompletionDate', 'completion', 'materialTestingDate',
+        'ldNewCompletionDate', 'completion', 'materialTestingDate', 'noaDueDate',
     ];
 
     private const AMOUNTS = ['approvedBudget', 'bidAmount', 'ldAmount'];
@@ -87,6 +87,15 @@ final class FormattedProjectExport
             foreach (['min'=>'31', 'max'=>'31', 'width'=>'18', 'customWidth'=>'1'] as $key=>$value) $column->setAttribute($key, $value);
             $xpath->query('/x:worksheet/x:cols')->item(0)?->appendChild($column);
             $columnWidths[31] = 18;
+            $noaHeader = $header->cloneNode(true);
+            $noaHeader->setAttribute('r', 'AF1');
+            self::setCell($document, $noaHeader, 'remarks', 'NOA Due Date');
+            $templateRows[1]->appendChild($noaHeader);
+            $noaColumn = $column->cloneNode(true);
+            $noaColumn->setAttribute('min', '32');
+            $noaColumn->setAttribute('max', '32');
+            $xpath->query('/x:worksheet/x:cols')->item(0)?->appendChild($noaColumn);
+            $columnWidths[32] = 18;
             $count = 0;
             foreach ($records as $record) {
                 $count++;
@@ -104,7 +113,7 @@ final class FormattedProjectExport
                 }
                 $wrappedLines = 1;
                 foreach (self::COLUMNS as $index => $key) {
-                    if ($key === 'materialTestingDate' && !isset($cells[$index])) {
+                    if (in_array($key, ['materialTestingDate','noaDueDate'], true) && !isset($cells[$index])) {
                         $cells[$index] = $cells[20]->cloneNode(true);
                         $row->appendChild($cells[$index]);
                     }

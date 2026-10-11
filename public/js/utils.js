@@ -325,6 +325,54 @@ function parseContractDuration(value) {
     return Number.isFinite(days) && days > 0 && days <= 36500 ? days : null;
 }
 
+// Workday offsets exclude the starting date, weekends and declared national holidays.
+function isProjectWorkday(date, utc = true) {
+    const day = utc ? date.getUTCDay() : date.getDay();
+    const year = utc ? date.getUTCFullYear() : date.getFullYear();
+    const month = (utc ? date.getUTCMonth() : date.getMonth()) + 1;
+    const dayOfMonth = utc ? date.getUTCDate() : date.getDate();
+    const key = `${year}-${String(month).padStart(2, "0")}-${String(dayOfMonth).padStart(2, "0")}`;
+    return !(window.projectHolidayCalendar?.nonWorkingDays || [0,6]).includes(day) && (window.projectHolidayCalendar?.excludeHolidays === false || !window.projectHolidayCalendar?.years?.[year]?.[key]);
+}
+
+
+function projectWeekday(date, utc = true) {
+    if (!date) return null;
+    const result = new Date(date);
+    while (!isProjectWorkday(result, utc)) {
+        if (utc) result.setUTCDate(result.getUTCDate() + 1);
+        else result.setDate(result.getDate() + 1);
+    }
+    return result;
+}
+
+function addProjectWorkdays(date, days, utc = true) {
+    let result = new Date(date);
+    const direction = days < 0 ? -1 : 1;
+    const whole = Math.floor(Math.abs(days));
+    for (let i = 0; i < whole; i++) {
+        do {
+            if (utc) result.setUTCDate(result.getUTCDate() + direction);
+            else result.setDate(result.getDate() + direction);
+        } while (!isProjectWorkday(result, utc));
+    }
+    result = projectWeekday(result, utc);
+    result = new Date(result.getTime() + direction * Math.round((Math.abs(days) - whole) * 86400) * 1000);
+    return projectWeekday(result, utc);
+}
+
+function projectWorkdaysBetween(start, end) {
+    const a = new Date(Date.UTC(start.getFullYear(), start.getMonth(), start.getDate()));
+    const b = new Date(Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()));
+    if (a > b) return -projectWorkdaysBetween(end, start);
+    let days = 0;
+    while (a < b) {
+        a.setUTCDate(a.getUTCDate() + 1);
+        if (isProjectWorkday(a)) days++;
+    }
+    return days;
+}
+
 function getProjectMilestoneDates(project = {}) {
     const bidding = projectCalendarDate(project.biddingDate);
     let biddingDue = "";
@@ -336,18 +384,19 @@ function getProjectMilestoneDates(project = {}) {
         last.setUTCMonth(last.getUTCMonth() + 1);
         last.setUTCDate(0);
         next.setUTCDate(Math.min(bidding.getUTCDate(), last.getUTCDate()));
-        biddingDue = next.toISOString().slice(0, 10);
+        biddingDue = projectWeekday(next).toISOString().slice(0, 10);
     }
     const days = parseContractDuration(project.contractDuration);
     const start = projectCalendarDate(project.contractRef);
     const end = start && days !== null
-        ? new Date(start.getTime() + Math.round(days * 86400) * 1000)
-        : projectCalendarDate(project.contractEndDate);
-    return { preInspectionDueDate: biddingDue, ntpDueDate: biddingDue, materialTestingDueDate: biddingDue, contractDueDate: end ? end.toISOString().slice(0, 10) : "", finalInspectionDueDate: end ? end.toISOString().slice(0, 10) : "" };
+        ? addProjectWorkdays(start, days)
+        : projectWeekday(projectCalendarDate(project.contractEndDate));
+    return { noaDueDate: projectCalendarDate(project.noaDueDate) ? projectWeekday(projectCalendarDate(project.noaDueDate)).toISOString().slice(0, 10) : "", preInspectionDueDate: biddingDue, ntpDueDate: biddingDue, materialTestingDueDate: biddingDue, contractDueDate: end ? end.toISOString().slice(0, 10) : "", finalInspectionDueDate: end ? end.toISOString().slice(0, 10) : "" };
 }
 
 function projectMilestoneDueDate(project, type) {
     const dates = getProjectMilestoneDates(project);
+    if (type.startsWith("noa")) return dates.noaDueDate;
     if (type.startsWith("pre-inspection")) return dates.preInspectionDueDate;
     if (type.startsWith("final-inspection")) return dates.finalInspectionDueDate;
     if (type.startsWith("ntp-due")) return dates.ntpDueDate;
