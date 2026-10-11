@@ -2722,8 +2722,8 @@ ADD / EDIT PROJECT
         <li>Choose <strong>Add Project</strong>. Enter the required <strong>Project Title</strong> and <strong>Approved Budget for the Contract</strong>. Include the location in the title, for example “Residential Building at Brgy. 1”. Add the bidding date and winning bidder when available. The next project number is a preview; the server confirms the assigned number when saving.</li>
         <li>Complete the relevant sections: project information and fund source (use <strong>Others</strong> for a custom source); bidding and bid amount; bidder; purchase request and obligation dates; resolution; post qualification; NOA deadline and issuance; performance bond; contract date and duration; NTP; DOLE clearance; inspection, testing, SWA and completion; liquidated damages; and remarks.</li>
         <li>Enter amounts as non-negative numbers with at most two decimal places. Enter <strong>Contract Duration</strong> as a positive number of working days, such as <strong>30</strong> or <strong>30.5</strong>. Do not append “days”. The Contract Due Date is calculated from the Contract Date and duration. Liquidated-damages fields record the amount, number of days, revised completion date and actual duration; entering a revised date does not replace the calculated contract deadline.</li>
-        <li>Select <strong>Save Project</strong> and wait for <strong>Saved</strong>. To update a project, use its <strong>Edit</strong> action, review the fields and choose <strong>Apply Records Change</strong>. <strong>Cancel</strong> or the editor’s close button discards unsaved edits.</li>
-        <li>The interface shows <strong>Saving</strong>, <strong>Saved</strong> or <strong>Save failed</strong>. A failure leaves your draft open for correction. Only a successful server response confirms saving. If saving succeeds but the view update fails, the message distinguishes the saved record from the pending refresh.</li>
+        <li>Select <strong>Save Project</strong> and wait for confirmation. To update a project, use its <strong>Edit</strong> action, review the fields and choose <strong>Apply Records Change</strong>. <strong>Cancel</strong> or the editor’s close button discards unsaved edits.</li>
+        <li>The save button shows <strong>Saving</strong> while the request is in progress. A successful save shows a brief confirmation, and the header message clears. <strong>Save failed</strong> remains visible and leaves your draft open for correction. Only a successful server response confirms saving. If saving succeeds but the view update fails, the notification distinguishes the saved record from the pending refresh.</li>
     </ol></section><section id="projectUserGuideContent-topic-5" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-5-title" hidden><span class="guide-topic-kicker">Track progress</span><h2 id="projectUserGuideContent-topic-5-title">Milestone deadlines, actual dates and status</h2><div class="table-responsive">
         <table class="table table-sm table-bordered">
             <thead><tr><th scope="col">Milestone</th><th scope="col">Deadline / entry</th><th scope="col">How to resolve</th></tr></thead>
@@ -2975,7 +2975,7 @@ ADD / EDIT PROJECT
 
     <script src="js/timeline.js?v=20261010-date-only-alerts"></script>
 
-    <script src="js/projects.js?v=20261010-date-only-alerts"></script>
+    <script src="js/projects.js?v=20261011-save-feedback"></script>
     <script src="js/project-presence.js?v=20261010-presence-csrf-fix"></script>
     <script src="js/guide.js?v=20261010-guide-cleanup"></script>
 

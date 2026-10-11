@@ -481,8 +481,13 @@ function setProjectSaveState(saving, message = "", failed = false) {
     if (status && message) {
         status.textContent = message;
         status.title = message;
-        status.classList.remove("d-none", "text-danger", "text-success", "text-muted");
-        status.classList.add(failed ? "text-danger" : saving ? "text-muted" : "text-success");
+        status.classList.remove("text-danger", "text-success", "text-muted");
+        if (saving || failed) {
+            status.classList.remove("d-none");
+            status.classList.add(failed ? "text-danger" : "text-muted");
+        } else {
+            status.classList.add("d-none");
+        }
     }
 }
 
