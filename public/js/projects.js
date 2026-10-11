@@ -3038,6 +3038,7 @@ function editDocument(id, source = "projects") {
 
         document.body.classList.add("project-edit-pane-open");
         document.getElementById("editPaneCloseButton")?.classList.remove("d-none");
+        document.getElementById("projectEditorAlertsButton")?.classList.remove("d-none");
 
 
         /*
@@ -3094,6 +3095,7 @@ function resetFormAccess(options = {}) {
         editingId !== null;
     const attachmentDraftProjectId = editingId;
     const returnWorkspace = projectEditReturnWorkspace || "documents";
+    hideProjectAlertsDropdown();
     if (typeof stopProjectEditingPresence === "function") void stopProjectEditingPresence();
     editingId = null;
     projectEditSnapshot = null;
@@ -3102,6 +3104,7 @@ function resetFormAccess(options = {}) {
     projectEditSource = "projects";
     document.body.classList.remove("project-edit-pane-open");
     document.getElementById("editPaneCloseButton")?.classList.add("d-none");
+    document.getElementById("projectEditorAlertsButton")?.classList.add("d-none");
     projectAttachmentRecords = [];
     pendingProjectAttachmentFiles = [];
     pendingProjectAttachmentDeletes = new Set();
@@ -3434,9 +3437,7 @@ async function showProjectAlertsDropdown(id, anchor) {
         if (sequence !== projectAlertDropdownSequence || projectAlertDropdownId !== id) return;
         const alerts = result.alerts || [];
         panel.innerHTML = `<div class="notification-panel-header"><div class="project-alert-dropdown-heading"><span class="notification-panel-title">Project alerts</span><button type="button" class="btn-close" aria-label="Close project alerts" onclick="hideProjectAlertsDropdown(true)"></button></div><span class="notification-panel-subtitle">Project no. ${escapeHtml(result.project.projectNo || "Not assigned")} · ${alerts.length} alert${alerts.length === 1 ? "" : "s"}</span></div><div class="notification-panel-body"><ul class="notification-list project-alerts-list list-unstyled mb-0">${alerts.length ? alerts.map(item => {
-            const canEnterDate = item.status !== "Resolved" && canEditAlertProjects();
-            const action = canEnterDate ? `<button type="button" class="btn btn-sm btn-outline-primary" onclick="openProjectAlertEditor(${Number(id)})">Enter date</button>` : "";
-            return `<li><div class="project-alert-dropdown-copy"><div class="project-alert-card-heading"><strong>${escapeHtml(item.label)}</strong><span class="project-alert-status ${item.status === "Active" ? "is-active" : item.status === "Resolved" ? "is-resolved" : "is-upcoming"}">${escapeHtml(item.status)}</span></div>${[item.dueDate ? `Due ${formatUIDate(item.dueDate)}` : "", item.doneDate ? `Completed ${formatUIDate(item.doneDate)}` : ""].filter(Boolean).map(value => `<span class="project-alert-date">${escapeHtml(value)}</span>`).join("")}</div>${action}</li>`;
+            return `<li><div class="project-alert-dropdown-copy"><div class="project-alert-card-heading"><strong>${escapeHtml(item.label)}</strong><span class="project-alert-status ${item.status === "Active" ? "is-active" : item.status === "Resolved" ? "is-resolved" : "is-upcoming"}">${escapeHtml(item.status)}</span></div>${[item.dueDate ? `Due ${formatUIDate(item.dueDate)}` : "", item.doneDate ? `Completed ${formatUIDate(item.doneDate)}` : ""].filter(Boolean).map(value => `<span class="project-alert-date">${escapeHtml(value)}</span>`).join("")}</div></li>`;
         }).join("") : '<li class="text-muted">No alerts for this project.</li>'}</ul></div>`;
         positionProjectAlertsDropdown();
     } catch (error) {
@@ -3476,17 +3477,9 @@ function toggleProjectAlertsPanel(event) {
     if (projectDetailsEditId) showProjectAlertsDropdown(projectDetailsEditId, document.getElementById("projectDetailsAlertsButton"));
 }
 
-function openProjectAlertEditor(id) {
-    const projectId = Number(id);
-    if (!canEditAlertProjects() || !Number.isSafeInteger(projectId) || projectId <= 0) return;
-    hideProjectAlertsDropdown();
-    const details = document.getElementById("projectDetailsModal");
-    if (details?.classList.contains("show")) {
-        details.addEventListener("hidden.bs.modal", () => editDocument(projectId, "alerts"), { once: true });
-        bootstrap.Modal.getInstance(details)?.hide();
-    } else {
-        editDocument(projectId, "alerts");
-    }
+function toggleProjectEditorAlertsPanel(event) {
+    event?.stopPropagation();
+    if (editingId !== null) showProjectAlertsDropdown(editingId, document.getElementById("projectEditorAlertsButton"));
 }
 
 document.addEventListener("click", event => {

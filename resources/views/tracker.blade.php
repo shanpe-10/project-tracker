@@ -21,7 +21,7 @@
         rel="stylesheet"
     >
 
-    <link rel="stylesheet" href="css/styles.css?v=20261010-history-actor">
+    <link rel="stylesheet" href="css/styles.css?v=20261011-editor-alerts">
 </head>
 
 
@@ -1004,7 +1004,10 @@ ADD / EDIT PROJECT
 
                             </div>
 
-                            <button type="button" id="editPaneCloseButton" class="btn-close d-none" aria-label="Close editor" onclick="resetFormAccess()"></button>
+                            <div class="project-form-header-actions">
+                                <button type="button" id="projectEditorAlertsButton" class="project-alert-button btn btn-sm btn-outline-danger d-none" aria-expanded="false" aria-controls="projectAlertsPanel" aria-haspopup="dialog" onclick="toggleProjectEditorAlertsPanel(event)">Alerts</button>
+                                <button type="button" id="editPaneCloseButton" class="btn-close d-none" aria-label="Close editor" onclick="resetFormAccess()"></button>
+                            </div>
 
                         </div>
 
@@ -2740,7 +2743,7 @@ ADD / EDIT PROJECT
     <p>Calculated due dates are read-only and do not fill actual dates. Calendar-month deadlines clamp to the last valid day of the next month, then move to the next working day if necessary. Admin controls reminder lead times; final-inspection reminders default to <strong>7 working days</strong> before the contract deadline. A valid actual milestone date on or before today resolves its alerts. A future actual date remains scheduled and does not resolve the reminder early.</p>
     <p>Status follows recorded milestones: no bidding date → <strong>On-going Bidding</strong>; bidding date → <strong>Pre-inspection</strong>; actual pre-inspection, material-testing and NTP dates all present → <strong>Pending</strong>. At the contract deadline, missing final inspection produces <strong>Final-inspection</strong>. Entering a valid <strong>Final Inspection Date</strong> sets the status to <strong>Pending</strong>, even before the contract deadline or when earlier milestone dates are missing. Completion Date produces <strong>Completed</strong>; SWA Date produces <strong>Released</strong>, which takes priority. A project explicitly kept Completed/Released retains that status. A Completed project requires a Completion Date and appears in Monthly Completions for that date’s month/year.</p>
     <p>Status colors: <strong>Pending—amber; On-going Bidding—blue; Pre-inspection—cyan; Final-inspection—purple; Completed—green; Released—teal.</strong> Read the label as well as its color. Completed projects can still need SWA follow-up until SWA is recorded.</p></section><section id="projectUserGuideContent-topic-6" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-6-title" hidden><span class="guide-topic-kicker">Keep reminders accurate</span><h2 id="projectUserGuideContent-topic-6-title">Resolve and restore alerts</h2><ol>
-        <li>Use <strong>Enter date</strong> on a milestone alert to open the permitted editor, record the actual date and save. NOA, pre-inspection, NTP, material-testing, final-inspection and SWA alerts resolve from their dates.</li>
+        <li>Choose <strong>Edit</strong> on the project, record the actual milestone date and save. Use <strong>Alerts</strong> in the project details or editor to check alert statuses and dates. NOA, pre-inspection, NTP, material-testing, final-inspection and SWA alerts resolve from their dates. Editing requires project-edit permission.</li>
         <li>Alerts resolve automatically from a valid actual milestone date on or before today, including older NOA and NTP reminders. A future date stays scheduled until that date. Recording or correcting a milestone requires <strong>Edit</strong> permission.</li>
         <li><strong>Resolved Alerts</strong> groups completed reminders by milestone. Use its search/date filters and category pages to review them. <strong>Restore</strong> reopens a historical manually resolved reminder and requires the <strong>Restore historical alerts</strong> permission. Automatically resolved entries offer <strong>View</strong>; edit or clear the actual date to reopen the reminder when due. Existing historical manual flags may also need restoring.</li>
     </ol></section><section id="projectUserGuideContent-topic-7" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-7-title" hidden><span class="guide-topic-kicker">Review your records</span><h2 id="projectUserGuideContent-topic-7-title">Working dates and Philippine holidays</h2><p>The shared working-day calendar controls durations, reminder lead times and selectable dates. Saturdays, Sundays and Philippine non-working holidays are excluded by default. Shaded non-working dates cannot be selected; unchanged historical dates remain available for reference. Calculated deadlines move forward to a working day. Contact IT about calendar corrections; calendar-management instructions are in the separate account-management guide.</p></section><section id="projectUserGuideContent-topic-8" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-8-title" hidden><span class="guide-topic-kicker">Files &amp; documents</span><h2 id="projectUserGuideContent-topic-8-title">Attachments</h2><ol>
@@ -2975,7 +2978,7 @@ ADD / EDIT PROJECT
 
     <script src="js/timeline.js?v=20261010-date-only-alerts"></script>
 
-    <script src="js/projects.js?v=20261011-save-feedback"></script>
+    <script src="js/projects.js?v=20261011-editor-alerts"></script>
     <script src="js/project-presence.js?v=20261010-presence-csrf-fix"></script>
     <script src="js/guide.js?v=20261010-guide-cleanup"></script>
 
