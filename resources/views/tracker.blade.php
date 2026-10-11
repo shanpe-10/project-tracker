@@ -2983,7 +2983,7 @@ ADD / EDIT PROJECT
 
     <script src="js/timeline.js?v=20261010-date-only-alerts"></script>
 
-    <script src="js/projects.js?v=20261011-account-sessions"></script>
+    <script src="js/projects.js?v=20261011-noa-badge"></script>
     <script src="js/project-presence.js?v=20261011-account-sessions"></script>
     <script src="js/guide.js?v=20261010-guide-cleanup"></script>
 

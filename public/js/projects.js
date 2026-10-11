@@ -1527,7 +1527,7 @@ const isAwardingOverdue =
                 </span>
             `);
 
-        } else if (milestoneAlerts.length > 0 || isNoaAlertActive) {
+        } else if (isNoaAlertActive) {
 
             alerts.push(`
                 <span class="project-alert-chip alert-warning">

@@ -52,6 +52,8 @@ jobs:
         run: |
           node tests/account-sessions.test.cjs
           node tests/shared-updates.test.cjs
+      - name: Check project alert badges
+        run: node tests/project-alert-badges.test.cjs
   docker:
     runs-on: ubuntu-latest
     services:
