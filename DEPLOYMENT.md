@@ -16,7 +16,7 @@ If Neon verification hangs in the embedded browser, use normal Edge or Brave.
 ## 2. Neon database and private files
 
 1. Create `project-tracker-pilot`, PostgreSQL **18**, on the Free plan.
-2. Choose a region available to both Neon and Render; use the same or nearest region.
+2. This pilot uses Singapore in Neon and Render. The Blueprint is set to `singapore`.
 3. Click **Connect** and turn **connection pooling off**. The backup locks and PostgreSQL
    dump need a direct connection. Retain `sslmode=require` in the connection string.
 4. Create an Object Storage bucket dedicated to this pilot and keep it **private**.
