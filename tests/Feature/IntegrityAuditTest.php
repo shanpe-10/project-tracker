@@ -28,7 +28,7 @@ class IntegrityAuditTest extends TestCase
     }
     private function api(array $body,string $endpoint='data.php')
     {
-        return $this->withSession($this->session)->withHeader('X-CSRF-Token','integrity-token')->postJson('/api/'.$endpoint,$body);
+        return $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','integrity-token')->postJson('/api/'.$endpoint,$body);
     }
     private function project(): array
     {

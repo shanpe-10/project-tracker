@@ -32,7 +32,8 @@ return [
     |
     */
 
-    'lifetime' => (int) env('SESSION_LIFETIME', 120),
+    // TrackerSession enforces the role-specific idle limit and eight-hour maximum.
+    'lifetime' => max(480, (int) env('SESSION_LIFETIME', 480)),
 
     'expire_on_close' => env('SESSION_EXPIRE_ON_CLOSE', false),
 

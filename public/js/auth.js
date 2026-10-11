@@ -11,6 +11,7 @@ function setPermissionControlState(id, allowed, unavailableTitle) {
     control.setAttribute("aria-disabled", String(!allowed));
 }
 async function authRequest(action, payload = {}) {
+    const expectedCsrf = window.sessionCsrfToken;
     const response = await fetch("api/auth.php", {
         method: "POST",
         credentials: "same-origin",
@@ -18,10 +19,11 @@ async function authRequest(action, payload = {}) {
         body: JSON.stringify({ action, ...payload })
     });
     const result = await response.json().catch(() => ({}));
+    if (response.status === 401 && action !== "login" && typeof handleTrackerAuthenticationFailure === "function") handleTrackerAuthenticationFailure(result, expectedCsrf);
     if (!response.ok && !result.message) result.message = "The login service is unavailable.";
     return result;
 }
-function applyAuthenticatedUser(user, csrfToken) {
+function applyAuthenticatedUser(user, csrfToken, sessionTiming = null) {
     window.currentUser = user;
     window.sessionCsrfToken = csrfToken;
     document.getElementById("currentUserName").textContent = user.fullName || user.username;
@@ -80,8 +82,12 @@ function applyAuthenticatedUser(user, csrfToken) {
         clearInterval(window.accountNotificationTimer);
         window.accountNotificationTimer = setInterval(refreshPendingAccountNotifications, 30000);
     }
+    if (typeof startTrackerSession === "function") startTrackerSession(sessionTiming);
 }
 function showLogin(message = "") {
+    if (typeof preserveSuspendedProjectDraft === "function" && preserveSuspendedProjectDraft()) message += " Your project draft is kept in this tab. Sign in with the same account to continue; do not refresh or close this tab.";
+    if (typeof stopTrackerSession === "function") stopTrackerSession();
+    if (typeof bootstrap !== "undefined") document.querySelectorAll(".modal.show").forEach(modal => bootstrap.Modal.getInstance(modal)?.hide());
     if (typeof resetFormAccess === "function") resetFormAccess({ silent: true, navigate: false, preserveDraft: true });
     if (typeof stopProjectEditingPresence === "function") void stopProjectEditingPresence({ clear: true });
     window.currentUser = null;
@@ -120,7 +126,8 @@ async function signIn(event) {
             }
             return;
         }
-        applyAuthenticatedUser(result.user, result.csrfToken);
+        applyAuthenticatedUser(result.user, result.csrfToken, result.sessionTiming);
+        document.getElementById("loginPassword").value = "";
         await initializeDatabase();
     } catch (_) {
         showLogin(connectionHelpMessage());
@@ -267,7 +274,7 @@ async function renderEditedProfilePhoto() {
 document.addEventListener("DOMContentLoaded", async () => {
     try {
         const result = await authRequest("session");
-        if (result.ok && result.authenticated) { applyAuthenticatedUser(result.user, result.csrfToken); await initializeDatabase(); }
-        else showLogin();
+        if (result.ok && result.authenticated) { applyAuthenticatedUser(result.user, result.csrfToken, result.sessionTiming); await initializeDatabase(); }
+        else showLogin(result.message || "");
     } catch (_) { showLogin(connectionHelpMessage()); }
 });

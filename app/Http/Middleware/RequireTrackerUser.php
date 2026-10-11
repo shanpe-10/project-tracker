@@ -3,6 +3,7 @@
 namespace App\Http\Middleware;
 
 use App\Models\User;
+use App\Http\Controllers\TrackerProjectPresenceController;
 use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -21,17 +22,17 @@ class RequireTrackerUser
             return response()->json(['ok' => false, 'message' => 'Authentication required.'], 401);
         }
 
-        if (\App\Support\TrackerSession::expired($request)) {
-            $request->session()->invalidate();
-
-            return response()->json(['ok' => false, 'message' => 'Your session has expired.'], 401);
-        }
-
         $account = User::find((int) ($sessionUser['id'] ?? 0));
         if (! $account || ! $account->active) {
             $request->session()->invalidate();
 
             return response()->json(['ok' => false, 'message' => 'Your account is no longer active. Please sign in again.'], 401);
+        }
+        if ($failure = \App\Support\TrackerSession::failure($request, $account)) {
+            TrackerProjectPresenceController::endSession($request);
+            \App\Support\TrackerSession::end($request);
+            $request->session()->invalidate();
+            return response()->json(['ok' => false, ...$failure], 401);
         }
         $request->session()->put('tracker_user', [
             'id' => (int) $account->id, 'username' => $account->username,
@@ -47,8 +48,6 @@ class RequireTrackerUser
                 return response()->json(['ok' => false, 'message' => 'The security token is invalid. Refresh and try again.'], 419);
             }
         }
-
-        $request->session()->put('tracker_last_activity', time());
 
         if ($account->role === 'superadmin' && ! $request->is('api/profile.php', 'api/holidays.php')) {
             return response()->json(['ok' => false, 'message' => 'Superadmin access is limited to account management and holiday settings.'], 403);

@@ -34,6 +34,7 @@
                 ...(method === "POST" ? { body: JSON.stringify(payload) } : {})
             });
             const result = await response.json();
+            if (response.status === 401 && typeof handleTrackerAuthenticationFailure === "function") handleTrackerAuthenticationFailure(result, csrf);
             if (!response.ok || !result.ok) throw new Error("Presence unavailable");
             return result;
         } finally {

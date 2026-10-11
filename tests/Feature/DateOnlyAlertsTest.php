@@ -37,7 +37,7 @@ class DateOnlyAlertsTest extends TestCase
 
     private function api(array $body, string $endpoint = 'data.php')
     {
-        return $this->withSession($this->session)->withHeader('X-CSRF-Token', 'date-only-token')->postJson('/api/'.$endpoint, $body);
+        return $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token', 'date-only-token')->postJson('/api/'.$endpoint, $body);
     }
 
     private function project(array $extra = []): array
@@ -105,7 +105,7 @@ class DateOnlyAlertsTest extends TestCase
         DB::table('users')->where('id',1)->update(['can_resolve_alerts'=>false]);
         $record = $this->project(['biddingDate'=>'2026-09-01', 'contractEndDate'=>'2026-10-01']);
         $record = $this->api(['action'=>'saveProject', 'record'=>array_replace($record, ['noa'=>'2026-10-09', 'ntpDate'=>'2026-10-09', 'preInspection'=>'2026-10-09', 'materialTestingDate'=>'2026-10-09', 'finalInspection'=>'2026-10-09'])])->assertOk()->assertJsonPath('record.status', 'Pending')->json('record');
-        $this->withSession($this->session)->getJson('/api/data.php?action=projectAlerts&projectId='.$record['id'])->assertOk()
+        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=projectAlerts&projectId='.$record['id'])->assertOk()
             ->assertJsonFragment(['label'=>'Notice of Award','status'=>'Resolved','doneDate'=>'2026-10-09'])
             ->assertJsonFragment(['label'=>'Notice to Proceed','status'=>'Resolved','doneDate'=>'2026-10-09'])
             ->assertJsonFragment(['label'=>'Final Inspection','status'=>'Resolved','doneDate'=>'2026-10-09']);

@@ -21,12 +21,12 @@ class ImportRegressionTest extends TestCase
         });
         DB::table('users')->insert(['id' => 8, 'username' => 'staff', 'full_name' => 'Staff', 'role' => 'staff', 'active' => true, 'can_edit' => false]);
         $session = ['tracker_user' => ['id' => 8, 'username' => 'staff', 'role' => 'staff', 'canEdit' => true], 'tracker_csrf' => 'test-token', 'tracker_created_at' => time(), 'tracker_last_activity' => time()];
-        $this->withSession($session)->postJson('/api/auth.php', ['action' => 'session'])
+        $this->withTrackerSession($session)->postJson('/api/auth.php', ['action' => 'session'])
             ->assertOk()->assertJsonPath('user.canEdit', false);
         DB::table('users')->where('id', 8)->delete();
-        $this->withSession($session)->postJson('/api/auth.php', ['action' => 'session'])
+        $this->withTrackerSession($session)->postJson('/api/auth.php', ['action' => 'session'])
             ->assertOk()->assertJsonPath('authenticated', false);
-        $this->withSession($session)->getJson('/api/data.php')->assertUnauthorized();
+        $this->withTrackerSession($session)->getJson('/api/data.php')->assertUnauthorized();
     }
 
     public function test_completed_historical_import_can_omit_completion_date(): void
@@ -82,7 +82,7 @@ class ImportRegressionTest extends TestCase
         DB::connection()->getPdo()->sqliteCreateFunction('REGEXP', fn ($pattern, $value) => preg_match('/'.$pattern.'/', (string) $value), 2);
 
         $session = ['tracker_user' => ['id' => 5, 'username' => 'admin', 'role' => 'admin'], 'tracker_csrf' => 'test-token', 'tracker_created_at' => time(), 'tracker_last_activity' => time()];
-        $response = $this->withSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', [
+        $response = $this->withTrackerSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', [
             'action' => 'bulkSaveProjects', 'batchId' => 'import_regression_1', 'archive' => true,
             'records' => [['title' => 'Historic Completed Project', 'projectNo' => '90001', 'status' => 'Completed', 'completion' => '']],
         ]);
@@ -94,7 +94,7 @@ class ImportRegressionTest extends TestCase
         $this->assertNotNull($row->archived_at);
         $this->assertNotEmpty(json_decode($row->data, true)['archivedAt']);
 
-        $this->withSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', [
+        $this->withTrackerSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', [
             'action' => 'bulkSaveProjects', 'batchId' => 'import_regression_2',
             'records' => [['title' => 'Active Completed Project', 'projectNo' => '90002', 'status' => 'Completed', 'completion' => '']],
         ])->assertOk()->assertJsonPath('count', 1);
@@ -105,7 +105,7 @@ class ImportRegressionTest extends TestCase
         $saved['attachments'] = [['name' => 'inspection.pdf', 'path' => 'stored/inspection.pdf']];
         DB::table('projects')->where('id', $activeRow->id)->update(['data' => json_encode($saved)]);
 
-        $this->withSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', [
+        $this->withTrackerSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', [
             'action' => 'bulkSaveProjects', 'batchId' => 'import_regression_4', 'archive' => true,
             'records' => [['id' => $activeRow->id, 'updatedAt' => $saved['updatedAt'], 'title' => 'Updated active project', 'projectNo' => '90002', 'status' => 'Completed', 'completion' => '']],
         ])->assertOk();
@@ -115,7 +115,7 @@ class ImportRegressionTest extends TestCase
         $this->assertArrayNotHasKey('archivedAt', $updated);
         $this->assertSame($saved['attachments'], $updated['attachments']);
 
-        $this->withSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', [
+        $this->withTrackerSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', [
             'action' => 'bulkSaveProjects', 'batchId' => 'import_regression_3', 'archive' => true,
             'records' => [['title' => 'Duplicate Number', 'projectNo' => '90002', 'status' => 'Completed', 'completion' => '']],
         ])->assertStatus(422)->assertJsonPath('message', 'Project number 90002 already exists. Choose Add as new with a new number or overwrite the matching project.');

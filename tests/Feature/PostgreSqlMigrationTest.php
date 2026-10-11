@@ -90,7 +90,7 @@ class PostgreSqlMigrationTest extends ComprehensiveUatTest
         $controller = new \App\Http\Controllers\TrackerBackupController;
         try {
             $archive = $controller->runScheduledBackup();
-            $response = $this->withSession(['tracker_user'=>['id'=>1,'role'=>'admin'],'tracker_csrf'=>'backup-token','tracker_created_at'=>time(),'tracker_last_activity'=>time()])->withHeader('X-CSRF-Token','backup-token')->postJson('/api/backups.php',['action'=>'runManual'])->assertOk()->assertJsonPath('ok',true);
+            $response = $this->withTrackerSession(['tracker_user'=>['id'=>1,'role'=>'admin'],'tracker_csrf'=>'backup-token','tracker_created_at'=>time(),'tracker_last_activity'=>time()])->withHeader('X-CSRF-Token','backup-token')->postJson('/api/backups.php',['action'=>'runManual'])->assertOk()->assertJsonPath('ok',true);
             $manual = (string) $response->json('archivePath');
             $this->assertNotNull($archive,'An enabled schedule must produce a project backup.');
             $this->assertStringStartsWith('project-data-',basename($archive));

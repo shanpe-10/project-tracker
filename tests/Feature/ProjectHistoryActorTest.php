@@ -48,7 +48,7 @@ class ProjectHistoryActorTest extends TestCase
 
     private function authenticated(): self
     {
-        $this->withSession($this->session);
+        $this->withTrackerSession($this->session);
         app('session')->save();
         return $this->withCredentials()->withCookie(config('session.cookie'), app('session')->getId())
             ->withHeader('X-CSRF-Token', 'history-token');

@@ -37,7 +37,7 @@ class FocusedAuditTest extends TestCase
 
     private function api(array $body, string $endpoint='data.php')
     {
-        return $this->withSession($this->session)->withHeader('X-CSRF-Token','audit-token')->postJson('/api/'.$endpoint,$body);
+        return $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','audit-token')->postJson('/api/'.$endpoint,$body);
     }
 
     private function project(array $data=[]): array
@@ -75,18 +75,18 @@ class FocusedAuditTest extends TestCase
     {
         $this->project(['title'=>'Active alert project','projectNo'=>'1','biddingDate'=>'2020-01-01']);
         $this->project(['title'=>'Unrelated project','projectNo'=>'2']);
-        $this->withSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=alerts')->assertOk()->assertJsonPath('totalRecords',1);
-        $csv=$this->withSession($this->session)->get('/api/data.php?action=listProjects&lifecycle=alerts&format=csv')->assertOk()->streamedContent();
+        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=alerts')->assertOk()->assertJsonPath('totalRecords',1);
+        $csv=$this->withTrackerSession($this->session)->get('/api/data.php?action=listProjects&lifecycle=alerts&format=csv')->assertOk()->streamedContent();
         $this->assertStringContainsString('Active alert project',$csv);
         $this->assertStringNotContainsString('Unrelated project',$csv);
-        $csv=$this->withSession($this->session)->get('/api/data.php?action=listProjects&lifecycle=alerts&search=missing&format=csv')->assertOk()->streamedContent();
+        $csv=$this->withTrackerSession($this->session)->get('/api/data.php?action=listProjects&lifecycle=alerts&search=missing&format=csv')->assertOk()->streamedContent();
         $this->assertSame(1,substr_count(trim($csv),"\n")+1);
     }
 
     public function test_csv_export_treats_formulas_as_text(): void
     {
         $this->project(['title'=>'=1+1','winningBidder'=>"\t=2+2",'remarks'=>'+SUM(1,2)']);
-        $csv=$this->withSession($this->session)->get('/api/data.php?action=listProjects&format=csv')->assertOk()->streamedContent();
+        $csv=$this->withTrackerSession($this->session)->get('/api/data.php?action=listProjects&format=csv')->assertOk()->streamedContent();
         $lines=explode("\n",trim($csv));
         $row=str_getcsv($lines[1],',','"','');
         $this->assertSame("'=1+1",$row[2]);
@@ -154,8 +154,8 @@ class FocusedAuditTest extends TestCase
     public function test_malformed_request_types_are_validation_errors(): void
     {
         $record=$this->project();
-        $this->withSession($this->session)->getJson('/api/data.php?action=listProjects&search[]=invalid')->assertStatus(422);
-        $this->withSession($this->session)->getJson('/api/profile.php?userId[]=invalid')->assertStatus(422);
+        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=listProjects&search[]=invalid')->assertStatus(422);
+        $this->withTrackerSession($this->session)->getJson('/api/profile.php?userId[]=invalid')->assertStatus(422);
         $this->api(['action'=>'deleteProject','id'=>1.5])->assertStatus(422);
         $this->api(['action'=>'setProjectArchived','id'=>[$record['id']],'archived'=>true])->assertStatus(422);
         $this->api(['action'=>'saveTimelineSettings','settings'=>'invalid'])->assertStatus(422);
@@ -175,15 +175,15 @@ class FocusedAuditTest extends TestCase
         $this->api(['action'=>'saveProject','record'=>array_replace($record,['title'=>'Changed'])])->assertOk();
         $saved=json_decode(DB::table('projects')->value('data'),true)+['id'=>$record['id']];
         $this->api(['action'=>'saveProject','record'=>array_replace($saved,['noa'=>'2026-02-30'])])->assertStatus(422);
-        $this->withSession($this->session)->withHeader('X-CSRF-Token','audit-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode(array_replace($saved,['ntpDate'=>'2026-02-30']))])->assertStatus(422);
+        $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','audit-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode(array_replace($saved,['ntpDate'=>'2026-02-30']))])->assertStatus(422);
         $this->assertSame('legacy-undated',json_decode(DB::table('projects')->value('data'),true)['noa']);
     }
 
     public function test_nested_uploads_are_rejected_cleanly(): void
     {
         $record=$this->project();
-        $this->withSession($this->session)->withHeader('X-CSRF-Token','audit-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode($record),'files'=>[['nested'=>UploadedFile::fake()->createWithContent('demo.txt','demo')]]])->assertStatus(422);
-        $this->withSession($this->session)->withHeader('X-CSRF-Token','audit-token')->post('/api/profile.php',['fullName'=>'Admin','photo'=>[UploadedFile::fake()->createWithContent('demo.png','demo')]])->assertStatus(422);
+        $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','audit-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode($record),'files'=>[['nested'=>UploadedFile::fake()->createWithContent('demo.txt','demo')]]])->assertStatus(422);
+        $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','audit-token')->post('/api/profile.php',['fullName'=>'Admin','photo'=>[UploadedFile::fake()->createWithContent('demo.png','demo')]])->assertStatus(422);
     }
 
     public function test_alert_updates_and_history_are_atomic_and_permission_checked(): void
@@ -272,16 +272,16 @@ class FocusedAuditTest extends TestCase
         $end=$today->modify('+7 days')->format('Y-m-d');
         $record=$this->project(['title'=>'Final deadline demo','contractEndDate'=>$end]);
         $this->project(['title'=>'No deadlines','projectNo'=>'124']);
-        $dashboard=$this->withSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->json('alerts');
+        $dashboard=$this->withTrackerSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->json('alerts');
         $this->assertSame(['final-inspection'],array_column($dashboard,'type'));
         $this->assertSame($end,$dashboard[0]['dueDate']);
-        $this->withSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=alerts')->assertOk()->assertJsonPath('totalRecords',1);
-        $csv=$this->withSession($this->session)->get('/api/data.php?action=listProjects&lifecycle=alerts&format=csv')->assertOk()->streamedContent();
+        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=alerts')->assertOk()->assertJsonPath('totalRecords',1);
+        $csv=$this->withTrackerSession($this->session)->get('/api/data.php?action=listProjects&lifecycle=alerts&format=csv')->assertOk()->streamedContent();
         $this->assertStringContainsString('Final deadline demo',$csv);
         $this->assertStringNotContainsString('No deadlines',$csv);
         $record['finalInspection']=$today->format('Y-m-d');
         $this->api(['action'=>'saveProject','record'=>$record])->assertOk();
-        $this->withSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->assertJsonPath('alertTotal',0);
+        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->assertJsonPath('alertTotal',0);
     }
 
 
@@ -289,7 +289,7 @@ class FocusedAuditTest extends TestCase
     {
         $today = now(config('app.timezone'))->format('Y-m-d');
         $record = $this->project(['biddingDate'=>'2020-01-01','preInspection'=>$today,'ntpDate'=>$today,'finalInspection'=>$today,'contractEndDate'=>$today]);
-        $getTypes = fn () => array_column($this->withSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->json('alerts'), 'type');
+        $getTypes = fn () => array_column($this->withTrackerSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->json('alerts'), 'type');
         $this->assertSame(['material-overdue'], $getTypes());
         $record = $this->api(['action'=>'saveProject','record'=>array_replace($record,['materialTestingDate'=>$today])])->assertOk()->json('record');
         $this->assertSame([], $getTypes());
@@ -317,7 +317,7 @@ class FocusedAuditTest extends TestCase
     {
         DB::table('users')->where('id',1)->update(['role'=>'admin']);
         DB::table('application_settings')->insert(['setting_key'=>'timeline_days','setting_value'=>json_encode(['noa'=>10,'ntp'=>30,'material'=>7,'completion'=>15,'finalInspection'=>23])]);
-        $this->withSession($this->session)->getJson('/api/data.php')->assertOk()->assertJsonPath('timelineSettings.bidding',7);
+        $this->withTrackerSession($this->session)->getJson('/api/data.php')->assertOk()->assertJsonPath('timelineSettings.bidding',7);
         $settings=['noa'=>10,'ntp'=>30,'material'=>7,'completion'=>15,'finalInspection'=>23,'bidding'=>19];
         $this->api(['action'=>'saveTimelineSettings','settings'=>$settings])->assertOk()->assertJsonPath('settings.bidding',19)->assertJsonPath('settings.ntp',30)->assertJsonPath('settings.material',7);
         unset($settings['bidding']);
@@ -332,7 +332,7 @@ class FocusedAuditTest extends TestCase
     public function test_material_date_import_export_and_old_spreadsheets_preserve_the_date(): void
     {
         $record=$this->project(['materialTestingDate'=>'2026-09-30']);
-        $csv=$this->withSession($this->session)->get('/api/data.php?action=listProjects&format=csv')->assertOk()->streamedContent();
+        $csv=$this->withTrackerSession($this->session)->get('/api/data.php?action=listProjects&format=csv')->assertOk()->streamedContent();
         $rows=array_map(fn ($line)=>str_getcsv($line,',','"',''),explode("\n",trim($csv)));
         $this->assertSame('Material Testing Date',$rows[0][30]);
         $this->assertSame('2026-09-30',$rows[1][30]);
@@ -361,12 +361,12 @@ class FocusedAuditTest extends TestCase
     {
         $today=now(config('app.timezone'))->format('Y-m-d');
         $record=$this->project(['ntpDate'=>'2020-01-01','materialTestingDate'=>$today]);
-        $types=array_column($this->withSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->json('alerts'),'type');
+        $types=array_column($this->withTrackerSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->json('alerts'),'type');
         $this->assertSame([],$types);
         $record=$this->api(['action'=>'saveProject','record'=>array_replace($record,['status'=>'Completed','completion'=>'2020-01-01','swa'=>now(config('app.timezone'))->addDay()->format('Y-m-d')])])->assertOk()->json('record');
-        $this->withSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->assertJsonPath('alerts.0.type','award-overdue');
+        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->assertJsonPath('alerts.0.type','award-overdue');
         $this->api(['action'=>'saveProject','record'=>array_replace($record,['swa'=>$today])])->assertOk();
-        $this->withSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->assertJsonPath('alertTotal',0);
+        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=dashboard')->assertOk()->assertJsonPath('alertTotal',0);
         $automatic=\App\Support\TrackerMilestones::automaticResolutions(['biddingDate'=>'2020-01-01','ntpDate'=>$today,'preInspection'=>$today,'materialTestingDate'=>$today,'finalInspection'=>$today,'swa'=>$today],new \DateTimeImmutable($today));
         $this->assertCount(5,$automatic);
         $this->assertContains('ntp-overdue',$automatic[1]['aliases']);
@@ -383,7 +383,7 @@ class FocusedAuditTest extends TestCase
             $this->api(['action'=>'saveProject','record'=>$changed])->assertStatus(422);
         }
         $this->api(['action'=>'saveTimelineRecord','record'=>array_replace($record,['timelineCompletedMarked'=>true]),'history'=>['action'=>'Rejected global bypass']])->assertStatus(422);
-        $this->withSession($this->session)->withHeader('X-CSRF-Token','audit-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode(array_replace($record,['timelineAlertsCompleted'=>['material-overdue']]))])->assertStatus(422);
+        $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','audit-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode(array_replace($record,['timelineAlertsCompleted'=>['material-overdue']]))])->assertStatus(422);
         $this->assertSame(0,DB::table('history')->count());
         $this->assertSame(0,DB::table('audit_log')->count());
         $this->assertSame($record['updatedAt'],json_decode(DB::table('projects')->value('data'),true)['updatedAt']);

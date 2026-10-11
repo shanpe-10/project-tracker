@@ -385,21 +385,24 @@ function attachmentDraftDatabase() {
 
 async function saveAttachmentDraft() {
     if (editingId === null) return;
+    const projectId = editingId, identity = attachmentDraftIdentity(projectId), locationKey = attachmentDraftLocationKey();
+    const files = [...pendingProjectAttachmentFiles], deleteIds = [...pendingProjectAttachmentDeletes];
     try {
         const database = await attachmentDraftDatabase();
         const transaction = database.transaction(attachmentDraftStoreName, "readwrite");
-        transaction.objectStore(attachmentDraftStoreName).put({ projectId: attachmentDraftIdentity(editingId), files: pendingProjectAttachmentFiles, deleteIds: [...pendingProjectAttachmentDeletes] });
-        localStorage.setItem(attachmentDraftLocationKey(), String(editingId));
+        transaction.objectStore(attachmentDraftStoreName).put({ projectId: identity, files, deleteIds });
+        localStorage.setItem(locationKey, String(projectId));
     } catch (error) { console.warn("Could not preserve attachment draft:", error); }
 }
 
 async function restoreAttachmentDraft(projectId) {
+    const userId = window.currentUser?.id, identity = attachmentDraftIdentity(projectId);
     try {
         const database = await attachmentDraftDatabase();
         const transaction = database.transaction(attachmentDraftStoreName, "readonly");
-        const request = transaction.objectStore(attachmentDraftStoreName).get(attachmentDraftIdentity(projectId));
+        const request = transaction.objectStore(attachmentDraftStoreName).get(identity);
         const draft = await new Promise((resolve, reject) => { request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); });
-        if (!draft || editingId !== projectId) return;
+        if (!draft || editingId !== projectId || window.currentUser?.id !== userId) return;
         pendingProjectAttachmentFiles = Array.isArray(draft.files) ? draft.files : [];
         pendingProjectAttachmentDeletes = new Set(Array.isArray(draft.deleteIds) ? draft.deleteIds : []);
         renderProjectAttachments(projectAttachmentRecords, projectId);
@@ -409,15 +412,17 @@ async function restoreAttachmentDraft(projectId) {
 
 async function clearAttachmentDraft(projectId) {
     if (projectId === null || projectId === undefined) return;
+    const identity = attachmentDraftIdentity(projectId), locationKey = attachmentDraftLocationKey();
     try {
         const database = await attachmentDraftDatabase();
         const transaction = database.transaction(attachmentDraftStoreName, "readwrite");
-        transaction.objectStore(attachmentDraftStoreName).delete(attachmentDraftIdentity(projectId));
-        if (localStorage.getItem(attachmentDraftLocationKey()) === String(projectId)) localStorage.removeItem(attachmentDraftLocationKey());
+        transaction.objectStore(attachmentDraftStoreName).delete(identity);
+        if (localStorage.getItem(locationKey) === String(projectId)) localStorage.removeItem(locationKey);
     } catch (error) { console.warn("Could not clear attachment draft:", error); }
 }
 
 function restoreAttachmentDraftPage() {
+    if (resumeSuspendedProjectDraft()) return;
     const projectId = Number.parseInt(localStorage.getItem(attachmentDraftLocationKey()), 10);
     if (Number.isInteger(projectId) && projectId > 0 && editingId === null) editDocument(projectId);
 }
@@ -798,12 +803,16 @@ async function updateDocument(id, payload) {
             formData.append("record", JSON.stringify(updatedRecord));
             formData.append("deleteIds", JSON.stringify([...pendingProjectAttachmentDeletes]));
             pendingProjectAttachmentFiles.forEach(file => formData.append("files[]", file));
+            const expectedCsrf = window.sessionCsrfToken;
             const response = await fetch("api/project-edit.php", {
                 method: "POST", credentials: "same-origin",
                 headers: { "X-CSRF-Token": window.sessionCsrfToken || "" }, body: formData
             });
             const result = await response.json().catch(() => ({}));
-            if (response.status === 401 && typeof showLogin === "function") showLogin("Your session has expired. Please sign in again.");
+            if (response.status === 401) {
+                if (typeof handleTrackerAuthenticationFailure === "function") handleTrackerAuthenticationFailure(result, expectedCsrf);
+                else if (typeof showLogin === "function") showLogin(result.message || "Your session has expired. Please sign in again.");
+            }
             if (!response.ok || !result.ok) {
                 const error = new Error(result.message || "Unable to save project changes.");
                 error.status = response.status;
@@ -2491,6 +2500,57 @@ const inputFieldsList = [
     "ldActualDuration", "completionDate", "remarks"
 ];
 
+// Forced sign-out retains fields only in this tab's memory, scoped to the account.
+// Keep the original version so a resumed draft cannot overwrite newer changes.
+const suspendedProjectDrafts = new Map();
+function preserveSuspendedProjectDraft() {
+    const userId = window.currentUser?.id;
+    if (!userId || !document.body.classList.contains("project-edit-pane-open")) return false;
+    const fields = {};
+    for (const id of [...inputFieldsList, "status"]) {
+        const field = document.getElementById(id);
+        if (field) fields[id] = field.value;
+    }
+    suspendedProjectDrafts.set(userId, {
+        userId, projectId: editingId, source: projectEditSource, returnWorkspace: projectEditReturnWorkspace,
+        snapshot: projectEditSnapshot ? JSON.parse(JSON.stringify(projectEditSnapshot)) : null, fields,
+        files: [...pendingProjectAttachmentFiles], deleteIds: [...pendingProjectAttachmentDeletes],
+    });
+    return true;
+}
+
+function applySuspendedProjectDraft(draft) {
+    if (window.currentUser?.id !== draft.userId || editingId !== draft.projectId) return;
+    for (const [id, value] of Object.entries(draft.fields)) {
+        const field = document.getElementById(id);
+        if (field) field.value = value;
+    }
+    projectEditSnapshot = draft.snapshot;
+    projectEditReturnWorkspace = draft.returnWorkspace;
+    projectEditSource = draft.source;
+    pendingProjectAttachmentFiles = draft.files;
+    pendingProjectAttachmentDeletes = new Set(draft.deleteIds);
+    document.getElementById("sourceOfFundCustomRow")?.classList.toggle("d-none", draft.fields.sourceOfFund !== "Others");
+    renderProjectAttachments(projectAttachmentRecords, editingId);
+    initializeLiveValueTracking();
+    suspendedProjectDrafts.delete(draft.userId);
+    showSystemNotification("Your unsaved project draft was restored. Review it before saving.");
+}
+
+function resumeSuspendedProjectDraft() {
+    const draft = suspendedProjectDrafts.get(window.currentUser?.id);
+    if (!draft || !db || editingId !== null) return false;
+    if (draft.projectId === null) {
+        if (!canCreateProjects()) return false;
+        openAddProjectPane();
+        applySuspendedProjectDraft(draft);
+    } else {
+        if (!canEditProjects()) return false;
+        editDocument(draft.projectId, draft.source, { suspendedDraft: draft });
+    }
+    return true;
+}
+
 function automaticProjectFormStatus() {
     const value=id=>document.getElementById(id)?.value||'';
     const current=value('status').toLowerCase();
@@ -2670,7 +2730,8 @@ function initializeLiveValueTracking() {
 }
 
 
-function editDocument(id, source = "projects") {
+function editDocument(id, source = "projects", options = {}) {
+    const editorUserId = window.currentUser?.id;
     const canEditThisSource = source === "alerts" ? canEditAlertProjects() : canEditProjects();
     if (!canEditThisSource) {
         showSystemNotification("You do not have permission to edit projects.");
@@ -2701,6 +2762,8 @@ function editDocument(id, source = "projects") {
 
     request.onsuccess = (event) => {
 
+        if (window.currentUser?.id !== editorUserId) return;
+
         const doc =
             event.target.result;
 
@@ -2720,7 +2783,7 @@ function editDocument(id, source = "projects") {
         pendingProjectAttachmentFiles = [];
         pendingProjectAttachmentDeletes = new Set();
         renderProjectAttachments(doc.attachments || [], id);
-        restoreAttachmentDraft(id);
+        if (!options.suspendedDraft) restoreAttachmentDraft(id);
 
 
         const headerEl =
@@ -3039,6 +3102,7 @@ function editDocument(id, source = "projects") {
         document.body.classList.add("project-edit-pane-open");
         document.getElementById("editPaneCloseButton")?.classList.remove("d-none");
         document.getElementById("projectEditorAlertsButton")?.classList.remove("d-none");
+        if (options.suspendedDraft) applySuspendedProjectDraft(options.suspendedDraft);
 
 
         /*

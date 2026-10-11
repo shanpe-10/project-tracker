@@ -48,6 +48,10 @@ jobs:
         run: echo "APP_KEY=base64:$(openssl rand -base64 32)" >> "$GITHUB_ENV"
       - name: Run PostgreSQL integration checks
         run: php vendor/bin/phpunit -c phpunit.cloud.xml
+      - name: Check account sessions and draft preservation
+        run: |
+          node tests/account-sessions.test.cjs
+          node tests/shared-updates.test.cjs
   docker:
     runs-on: ubuntu-latest
     services:

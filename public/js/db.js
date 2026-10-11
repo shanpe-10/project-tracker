@@ -6,11 +6,12 @@ window.dbReady = false;
 
 const apiClient = {
     async request(url, options = {}) {
+        const expectedCsrf = window.sessionCsrfToken;
         const response = await fetch(url, { credentials: "same-origin", cache: "no-store", ...options, headers: { "Content-Type": "application/json", "X-CSRF-Token": window.sessionCsrfToken || "", ...(options.headers || {}) } });
         const payload = await response.json().catch(() => ({}));
         if (response.status === 401) {
-            window.sessionCsrfToken = "";
-            if (typeof showLogin === "function") showLogin("Your session has expired. Please sign in again.");
+            if (typeof handleTrackerAuthenticationFailure === "function") handleTrackerAuthenticationFailure(payload, expectedCsrf);
+            else if (typeof showLogin === "function") showLogin(payload.message || "Your session has expired. Please sign in again.");
         }
         if (!response.ok || !payload.ok) throw new Error(payload.message || "The server could not process the request.");
         return payload;

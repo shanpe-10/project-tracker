@@ -18,7 +18,9 @@ class TrackerAuthController extends Controller
         if ($action === 'session') {
             $user = $this->currentSessionUser($request);
 
-            return response()->json(['ok' => true, 'authenticated' => $user !== null, 'user' => $user, 'csrfToken' => $user ? $request->session()->get('tracker_csrf') : null]);
+            return response()->json(['ok' => true, 'authenticated' => $user !== null, 'user' => $user, 'csrfToken' => $user ? $request->session()->get('tracker_csrf') : null,
+                'sessionTiming' => $user ? \App\Support\TrackerSession::timing($request, User::findOrFail($user['id'])) : null,
+                ...($request->attributes->get('tracker_session_failure') ?? [])]);
         }
         if ($action === 'login') {
             return $this->login($request);
@@ -29,17 +31,23 @@ class TrackerAuthController extends Controller
 
         $current = $this->currentSessionUser($request);
         if (! $current) {
-            return response()->json(['ok' => false, 'message' => 'Authentication required.'], 401);
+            return response()->json(['ok' => false, ...($request->attributes->get('tracker_session_failure') ?? ['message' => 'Authentication required.'])], 401);
         }
         if (! $this->validCsrf($request)) {
             return response()->json(['ok' => false, 'message' => 'The security token is invalid.'], 419);
         }
         if ($action === 'logout') {
             TrackerProjectPresenceController::endSession($request);
+            \App\Support\TrackerSession::end($request);
             $request->session()->invalidate();
             $request->session()->regenerateToken();
 
             return response()->json(['ok' => true]);
+        }
+        if ($action === 'activity') {
+            $account = User::findOrFail($current['id']);
+            \App\Support\TrackerSession::activity($request, $account);
+            return response()->json(['ok' => true, 'sessionTiming' => \App\Support\TrackerSession::timing($request, $account)]);
         }
         $activityAction = in_array($action, ['listAuditLog','clearAuditLogView'], true);
         if (($activityAction && $current['role'] !== 'admin') || (! $activityAction && $current['role'] !== 'superadmin')) {
@@ -85,8 +93,9 @@ class TrackerAuthController extends Controller
         $user = $this->userPayload($account);
         $csrf = Str::random(64);
         $request->session()->put(['tracker_user' => $user, 'tracker_csrf' => $csrf, 'tracker_created_at' => time(), 'tracker_last_activity' => time()]);
+        \App\Support\TrackerSession::start($request, $account);
 
-        return response()->json(['ok' => true, 'user' => $user, 'csrfToken' => $csrf]);
+        return response()->json(['ok' => true, 'user' => $user, 'csrfToken' => $csrf, 'sessionTiming' => \App\Support\TrackerSession::timing($request, $account)]);
     }
 
     private function adminAction(Request $request, array $current, string $action): JsonResponse
@@ -197,19 +206,21 @@ class TrackerAuthController extends Controller
         if (! is_array($saved)) {
             return null;
         }
-        if (\App\Support\TrackerSession::expired($request)) {
-            $request->session()->invalidate();
-            return null;
-        }
         $account = User::find((int) ($saved['id'] ?? 0));
         if (! $account || ! $account->active) {
             $request->session()->invalidate();
 
             return null;
         }
+        if ($failure = \App\Support\TrackerSession::failure($request, $account)) {
+            $request->attributes->set('tracker_session_failure', $failure);
+            TrackerProjectPresenceController::endSession($request);
+            \App\Support\TrackerSession::end($request);
+            $request->session()->invalidate();
+            return null;
+        }
         $user = $this->userPayload($account);
         $request->session()->put('tracker_user', $user);
-        $request->session()->put('tracker_last_activity', time());
 
         return $user;
     }

@@ -2,6 +2,7 @@
 <phpunit bootstrap="vendor/autoload.php" colors="true">
     <testsuites>
         <testsuite name="Pilot deployment">
+            <file>tests/Feature/AccountSessionsTest.php</file>
             <file>tests/Feature/CloudDeploymentTest.php</file>
             <file>tests/Feature/ProjectHistoryActorTest.php</file>
             <file>tests/Feature/ProjectEditingPresenceTest.php</file>
