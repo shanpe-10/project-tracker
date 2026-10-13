@@ -118,7 +118,7 @@ async function refreshSharedProjectData() {
         sharedProjectVersion = database.projectVersion;
         showSharedUpdatesIndicator(false);
         if (activeWorkspace === "dashboard-done" && typeof renderMarkedDoneTabContents === "function") renderMarkedDoneTabContents();
-        if (typeof refreshGlobalNotifications === "function") refreshGlobalNotifications();
+        if (activeWorkspace !== "dashboard" && typeof refreshGlobalNotifications === "function") refreshGlobalNotifications();
         if (projectDetailsModalShown && projectDetailsEditId !== null) {
             const tx = database.transaction(["projects"], "readonly");
             tx.objectStore("projects").get(projectDetailsEditId).onsuccess = event => {
@@ -542,7 +542,9 @@ function saveDocument() {
     }
 
     const completionDate = getDateValue('completionDate');
-    const statusValue = automaticProjectFormStatus();
+    const selectedStatus = getValue("status");
+    const manualStatus = selectedStatus && selectedStatus !== "Automatic" ? selectedStatus : null;
+    const statusValue = manualStatus || automaticProjectFormStatus();
     if (editingId === null && statusValue.toLowerCase() === "completed" && !completionDate) {
         updateCompletionDateHint();
         document.getElementById("completionDate")?.focus();
@@ -602,6 +604,7 @@ function saveDocument() {
 
         completion: completionDate,                                    // 24
         status: statusValue,                                           // 25
+        manualStatus,
         remarks: getValue("remarks"),                                // 26
 
         updatedAt: new Date().toISOString()
@@ -894,7 +897,6 @@ async function loadServerProjectPage(silent = false) {
 
 function loadDocuments(skipServerRefresh = false) {
     if (window.currentUser?.role === "superadmin") return;
-    if (typeof refreshGlobalNotifications === "function") refreshGlobalNotifications();
     if (!db) return;
 
     if (activeWorkspace === "dashboard" && typeof loadDashboardData === "function") {
@@ -902,6 +904,7 @@ function loadDocuments(skipServerRefresh = false) {
         return;
     }
 
+    if (typeof refreshGlobalNotifications === "function") refreshGlobalNotifications();
     if (["documents", "archive"].includes(activeWorkspace)) {
         if (skipServerRefresh) {
             loadServerProjectPage();
@@ -2553,9 +2556,8 @@ function resumeSuspendedProjectDraft() {
 
 function automaticProjectFormStatus() {
     const value=id=>document.getElementById(id)?.value||'';
-    const current=value('status').toLowerCase();
-    if(projectCalendarDate(value('swa'))||current==='released') return 'Released';
-    if(projectCalendarDate(value('completionDate'))||current==='completed') return 'Completed';
+    if(projectCalendarDate(value('swa'))) return 'Released';
+    if(projectCalendarDate(value('completionDate'))) return 'Completed';
     if(projectCalendarDate(value('finalInspection'))) return 'Pending';
     const project={biddingDate:value('biddingDate'),contractRef:value('contractRef'),contractDuration:value('contractDuration'),contractEndDate:value('contractEndDate')};
     const end=getProjectMilestoneDates(project).contractDueDate;
@@ -2570,8 +2572,15 @@ function updateCompletionDateHint() {
     const hint = document.getElementById("completionDateHint");
     if (!status || !completionDate || !hint) return;
 
-    status.value = automaticProjectFormStatus();
-    const isCompleted = String(status.value || "").trim().toLowerCase() === "completed";
+    const automaticStatus = automaticProjectFormStatus();
+    const manual = Boolean(status.value && status.value !== "Automatic");
+    const automaticOption = Array.from(status.options || []).find(option => option.value === "Automatic");
+    if (automaticOption) automaticOption.textContent = `Automatic (${automaticStatus})`;
+    const help = document.getElementById("operationalStatusHelp");
+    if (help) help.textContent = manual
+        ? "Your selected status takes priority over automatic updates until you switch back to Automatic."
+        : `Current automatic status: ${automaticStatus}. Choose a status above to override automatic updates.`;
+    const isCompleted = String(manual ? status.value : automaticStatus).trim().toLowerCase() === "completed";
     const hasCompletionDate = Boolean(completionDate.value);
 
     hint.classList.toggle("d-none", !isCompleted);
@@ -3063,10 +3072,11 @@ function editDocument(id, source = "projects", options = {}) {
             doc.completion
         );
 
-        setVal(
-            "status",
-            doc.status || "Pending"
-        );
+        // Preserve undated legacy terminal records as an explicit choice when edited.
+        const legacyManual = !Object.prototype.hasOwnProperty.call(doc, "manualStatus") &&
+            ((doc.status === "Released" && !projectCalendarDate(doc.swa)) ||
+             (doc.status === "Completed" && !projectCalendarDate(doc.completion)));
+        setVal("status", doc.manualStatus || (legacyManual ? doc.status : "Automatic"));
 
         setVal(
             "remarks",
@@ -3278,8 +3288,9 @@ function resetFormAccess(options = {}) {
 
     if (statusEl) {
         statusEl.value =
-            "Pending";
+            "Automatic";
     }
+    updateCompletionDateHint();
 
 
     const titleArea =

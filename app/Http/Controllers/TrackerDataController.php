@@ -196,7 +196,7 @@ class TrackerDataController extends Controller
                 return response()->json(['ok' => false, 'message' => 'You do not have permission to export projects.'], 403);
             }
             $rows = $query->orderByRaw($order)->pluck('data');
-            $columns = ['projectNo' => 'Project No.', 'biddingDate' => 'Date of Bidding', 'title' => 'Project Title', 'approvedBudget' => 'ABC', 'bidAmount' => 'Bid Amount', 'winningBidder' => 'Winning Bidder', 'sourceOfFund' => 'Source of Fund', 'prNumber' => 'PR Number', 'prDate' => 'PR Date', 'obre' => 'OBRE', 'resolutionNumber' => 'Resolution Number', 'resolutionDate' => 'Resolution Date', 'noticePostQual' => 'Notice of Post Qualification', 'noa' => 'Notice of Award', 'performanceBond' => 'Performance Bond', 'contractRef' => 'Contract Date', 'contractDuration' => 'Contract Duration', 'ntpDate' => 'Notice to Proceed', 'dole' => 'DOLE Clearance', 'contractEndDate' => 'Contract End Date', 'preInspection' => 'Pre Inspection', 'finalInspection' => 'Final Inspection', 'swa' => 'SWA', 'ldAmount' => 'LD Amount', 'ldNoOfDays' => 'LD Days', 'ldNewCompletionDate' => 'Extended Completion Date', 'ldActualDuration' => 'Actual Construction Duration', 'completion' => 'Completion Date', 'status' => 'Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date'];
+            $columns = ['projectNo' => 'Project No.', 'biddingDate' => 'Date of Bidding', 'title' => 'Project Title', 'approvedBudget' => 'ABC', 'bidAmount' => 'Bid Amount', 'winningBidder' => 'Winning Bidder', 'sourceOfFund' => 'Source of Fund', 'prNumber' => 'PR Number', 'prDate' => 'PR Date', 'obre' => 'OBRE', 'resolutionNumber' => 'Resolution Number', 'resolutionDate' => 'Resolution Date', 'noticePostQual' => 'Notice of Post Qualification', 'noa' => 'Notice of Award', 'performanceBond' => 'Performance Bond', 'contractRef' => 'Contract Date', 'contractDuration' => 'Contract Duration', 'ntpDate' => 'Notice to Proceed', 'dole' => 'DOLE Clearance', 'contractEndDate' => 'Contract End Date', 'preInspection' => 'Pre Inspection', 'finalInspection' => 'Final Inspection', 'swa' => 'SWA', 'ldAmount' => 'LD Amount', 'ldNoOfDays' => 'LD Days', 'ldNewCompletionDate' => 'Extended Completion Date', 'ldActualDuration' => 'Actual Construction Duration', 'completion' => 'Completion Date', 'status' => 'Operational Status', 'manualStatus' => 'Manual Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date'];
 
             if ($request->query('format') === 'xlsx') {
                 $records = $rows->map(fn ($json) => json_decode($json, true) ?: []);
@@ -446,14 +446,11 @@ class TrackerDataController extends Controller
                 return response()->json(['ok' => false, 'message' => 'Approved Budget is required and must be a non-negative amount with at most two decimal places.'], 422);
             }
         }
-        if ($project && strtolower(trim((string) ($record['status'] ?? ''))) === 'completed' && ! self::validProjectDate($record['completion'] ?? null)) {
-            $previous = $id ? json_decode((string) DB::table('projects')->where('id', $id)->value('data'), true) : null;
-            $legacyUndated = is_array($previous)
-                && strtolower(trim((string) ($previous['status'] ?? ''))) === 'completed'
-                && trim((string) ($previous['completion'] ?? '')) === ''
-                && trim((string) ($record['completion'] ?? '')) === '';
-            if (! $legacyUndated) {
-                return response()->json(['ok' => false, 'message' => 'Completed projects require a valid Completion Date.'], 422);
+        if ($project) {
+            $previous = $id ? json_decode((string) DB::table('projects')->where('id', $id)->value('data'), true) : [];
+            // Clients that do not include the new field must retain an existing override.
+            if (!array_key_exists('manualStatus', $record) && is_array($previous) && array_key_exists('manualStatus', $previous)) {
+                $record['manualStatus'] = $previous['manualStatus'];
             }
         }
         if ($project && $id && empty($user['canEdit'])) {
@@ -471,6 +468,14 @@ class TrackerDataController extends Controller
             \App\Support\TrackerProjectInput::validateDates($record, is_array($previous) ? $previous : []);
             \App\Support\TrackerProjectInput::validateManualResolution($record, is_array($previous) ? $previous : []);
             if (!$id) unset($record['attachments'], $record['archivedAt'], $record['archivedBy']);
+            $record = \App\Support\TrackerProjectInput::normalize($record);
+            if (strtolower(trim((string) ($record['status'] ?? ''))) === 'completed' && ! self::validProjectDate($record['completion'] ?? null)) {
+                $legacyUndated = is_array($previous)
+                    && strtolower(trim((string) ($previous['status'] ?? ''))) === 'completed'
+                    && trim((string) ($previous['completion'] ?? '')) === ''
+                    && trim((string) ($record['completion'] ?? '')) === '';
+                if (!$legacyUndated) return response()->json(['ok' => false, 'message' => 'Completed projects require a valid Completion Date.'], 422);
+            }
         }
         $clientUpdatedAt = (string) ($record['updatedAt'] ?? '');
         unset($record['id']);
@@ -480,7 +485,6 @@ class TrackerDataController extends Controller
         $record['updatedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
         $json = json_encode($record, JSON_UNESCAPED_UNICODE);
         if ($project) {
-            $record = \App\Support\TrackerProjectInput::normalize($record);
             $json = json_encode($record, JSON_UNESCAPED_UNICODE);
             $columns = $this->projectColumns($record);
             if ($id) {

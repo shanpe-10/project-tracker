@@ -373,7 +373,7 @@ class TrackerBackupController extends Controller
             'preInspection' => 'Pre Inspection', 'finalInspection' => 'Final Inspection', 'swa' => 'SWA', 'ldAmount' => 'LD Amount',
             'ldNoOfDays' => 'LD Days', 'ldNewCompletionDate' => 'Extended Completion Date',
             'ldActualDuration' => 'Actual Construction Duration', 'completion' => 'Completion Date',
-            'status' => 'Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date', 'archivedAt' => 'Archived At', 'archivedBy' => 'Archived By',
+            'status' => 'Operational Status', 'manualStatus' => 'Manual Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date', 'archivedAt' => 'Archived At', 'archivedBy' => 'Archived By',
         ];
         $rows = [array_values($columns)];
         DB::table('projects')->select('data', 'archived_at')

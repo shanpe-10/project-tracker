@@ -9,6 +9,7 @@
             <file>tests/Feature/SharedUpdatesTest.php</file>
             <file>tests/Feature/DateOnlyAlertsTest.php</file>
             <file>tests/Feature/GuideAndStatusUpdateTest.php</file>
+            <file>tests/Feature/ManualOperationalStatusTest.php</file>
         </testsuite>
     </testsuites>
     <php>

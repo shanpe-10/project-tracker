@@ -31,9 +31,9 @@ function applyAuthenticatedUser(user, csrfToken, sessionTiming = null) {
     const avatar = document.getElementById("currentUserInitial");
     if (avatar) avatar.textContent = initial || "U";
     const photo = document.getElementById("currentUserPhoto");
-    const photoUrl = user.profilePhoto || `api/profile.php?action=photo&v=${Date.now()}`;
+    const photoUrl = user.profilePhoto;
     if (avatar) {
-        avatar.style.backgroundImage = `url("${photoUrl}")`;
+        avatar.style.backgroundImage = photoUrl ? `url("${photoUrl}")` : "";
         avatar.classList.toggle("has-photo", Boolean(user.profilePhoto));
     }
     if (photo) {

@@ -1675,7 +1675,9 @@ ADD / EDIT PROJECT
                                             <select
                                                 id="status"
                                                 class="form-select"
+                                                aria-describedby="operationalStatusHelp"
                                             >
+                                                <option value="Automatic">Automatic — based on project dates</option>
 
                                                 <option value="Pending">
                                                     Pending
@@ -1702,6 +1704,7 @@ ADD / EDIT PROJECT
                                                 </option>
 
                                             </select>
+                                            <div id="operationalStatusHelp" class="form-helper" aria-live="polite">Choose a status to override automatic updates, or choose Automatic to use project dates.</div>
 
                                         </div>
 
@@ -2740,7 +2743,7 @@ ADD / EDIT PROJECT
             </tbody>
         </table>
     </div>
-    <p>Calculated due dates are read-only and do not fill actual dates. Calendar-month deadlines clamp to the last valid day of the next month, then move to the next working day if necessary. Admin controls reminder lead times; final-inspection reminders default to <strong>7 working days</strong> before the contract deadline. A valid actual milestone date on or before today resolves its alerts. A future actual date remains scheduled and does not resolve the reminder early.</p>
+    <p>Choose a status directly in the <strong>Operational Status</strong> dropdown to give it priority over project dates and automatic updates. Choose <strong>Automatic</strong> in the same dropdown to recalculate from dates. Manual Completed still requires a Completion Date for new completed records.</p><p>Calculated due dates are read-only and do not fill actual dates. Calendar-month deadlines clamp to the last valid day of the next month, then move to the next working day if necessary. Admin controls reminder lead times; final-inspection reminders default to <strong>7 working days</strong> before the contract deadline. A valid actual milestone date on or before today resolves its alerts. A future actual date remains scheduled and does not resolve the reminder early.</p>
     <p>Status follows recorded milestones: no bidding date → <strong>On-going Bidding</strong>; bidding date → <strong>Pre-inspection</strong>; actual pre-inspection, material-testing and NTP dates all present → <strong>Pending</strong>. At the contract deadline, missing final inspection produces <strong>Final-inspection</strong>. Entering a valid <strong>Final Inspection Date</strong> sets the status to <strong>Pending</strong>, even before the contract deadline or when earlier milestone dates are missing. Completion Date produces <strong>Completed</strong>; SWA Date produces <strong>Released</strong>, which takes priority. A project explicitly kept Completed/Released retains that status. A Completed project requires a Completion Date and appears in Monthly Completions for that date’s month/year.</p>
     <p>Status colors: <strong>Pending—amber; On-going Bidding—blue; Pre-inspection—cyan; Final-inspection—purple; Completed—green; Released—teal.</strong> Read the label as well as its color. Completed projects can still need SWA follow-up until SWA is recorded.</p></section><section id="projectUserGuideContent-topic-6" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-6-title" hidden><span class="guide-topic-kicker">Keep reminders accurate</span><h2 id="projectUserGuideContent-topic-6-title">Resolve and restore alerts</h2><ol>
         <li>Choose <strong>Edit</strong> on the project, record the actual milestone date and save. Use <strong>Alerts</strong> in the project details or editor to check alert statuses and dates. NOA, pre-inspection, NTP, material-testing, final-inspection and SWA alerts resolve from their dates. Editing requires project-edit permission.</li>
@@ -2967,7 +2970,7 @@ ADD / EDIT PROJECT
         <div><strong>Your session is about to end</strong><p>You will be signed out in <span id="sessionIdleCountdown">60</span> seconds because of inactivity. Your project draft will stay in this tab.</p></div>
         <button type="button" class="btn btn-primary btn-sm" onclick="keepTrackerSessionActive()">Stay signed in</button>
     </div>
-    <script src="js/auth.js?v=20261011-account-sessions"></script>
+    <script src="js/auth.js?v=20261013-status-dropdown"></script>
     <script src="js/session.js?v=20261011-account-sessions"></script>
 
     <script src="js/admin.js?v=20261011-cloud"></script>
@@ -2979,21 +2982,21 @@ ADD / EDIT PROJECT
     <script>window.projectHolidayCalendar = @json(\App\Support\TrackerHolidays::calendar());</script>
     <script src="js/utils.js?v=20261007-block-dates"></script>
 
-    <script src="js/history.js?v=20261010-history-actor"></script>
+    <script src="js/history.js?v=20261013-status-dropdown"></script>
 
     <script src="js/timeline.js?v=20261010-date-only-alerts"></script>
 
-    <script src="js/projects.js?v=20261011-noa-badge"></script>
+    <script src="js/projects.js?v=20261013-status-dropdown"></script>
     <script src="js/project-presence.js?v=20261011-account-sessions"></script>
     <script src="js/guide.js?v=20261010-guide-cleanup"></script>
 
     <script src="js/workspace.js?v=20261010-date-only-alerts"></script>
 
-    <script src="js/excel.js?v=20261007-block-dates"></script>
+    <script src="js/excel.js?v=20261013-status-dropdown"></script>
 
     <script src="js/holidays.js?v=20261007-block-dates"></script>
     <script src="js/workday-picker.js?v=20261007-block-dates"></script>
-    <script src="js/app.js?v=20261006-integrity-audit"></script>
+    <script src="js/app.js?v=20261013-status-dropdown"></script>
 
 
 

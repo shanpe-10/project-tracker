@@ -52,6 +52,7 @@ jobs:
         run: |
           node tests/account-sessions.test.cjs
           node tests/shared-updates.test.cjs
+          node tests/manual-operational-status.test.cjs
       - name: Check project alert badges
         run: node tests/project-alert-badges.test.cjs
   docker:

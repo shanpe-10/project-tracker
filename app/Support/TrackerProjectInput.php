@@ -4,6 +4,7 @@ use Illuminate\Validation\ValidationException;
 final class TrackerProjectInput
 {
     public const DATE_FIELDS = ['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completion'];
+    public const STATUSES = ['Pending', 'On-going Bidding', 'Pre-inspection', 'Final-inspection', 'Completed', 'Released'];
 
     public static function normalize(array $record): array
     {
@@ -12,13 +13,30 @@ final class TrackerProjectInput
         if ($days !== null && TrackerMilestones::date($record['contractRef'] ?? null)) {
             $record['contractEndDate'] = TrackerMilestones::dueDates($record)['contractDueDate'];
         }
-        $record['status'] = self::automaticStatus($record);
+        $record['status'] = self::effectiveStatus($record);
         return $record;
+    }
+
+    public static function effectiveStatus(array $record, ?\DateTimeImmutable $today = null): string
+    {
+        self::validateManualStatus($record);
+        $manual = $record['manualStatus'] ?? '';
+        return $manual !== '' ? $manual : self::automaticStatus($record, $today);
+    }
+
+    private static function validateManualStatus(array $record): void
+    {
+        $manual = $record['manualStatus'] ?? null;
+        if ($manual !== null && $manual !== '' && (! is_string($manual) || ! in_array($manual, self::STATUSES, true))) {
+            throw ValidationException::withMessages(['manualStatus' => 'Choose a valid manual operational status or use Automatic.']);
+        }
     }
 
     public static function automaticStatus(array $record, ?\DateTimeImmutable $today = null): string
     {
-        $status=strtolower(trim((string)($record['status']??'')));
+        // Retain legacy explicit terminal statuses. New records use dates in
+        // Automatic mode, so clearing an override cannot latch its old status.
+        $status=array_key_exists('manualStatus', $record) ? '' : strtolower(trim((string)($record['status']??'')));
         if(TrackerMilestones::date($record['swa']??null)||$status==='released') return 'Released';
         if(TrackerMilestones::date($record['completion']??null)||$status==='completed') return 'Completed';
         if(TrackerMilestones::date($record['finalInspection']??null)) return 'Pending';
@@ -70,6 +88,7 @@ final class TrackerProjectInput
 
     public static function validate(array $record): void
     {
+        self::validateManualStatus($record);
         if (isset($record['id']) && filter_var($record['id'], FILTER_VALIDATE_INT, ['options'=>['min_range'=>0]]) === false) throw ValidationException::withMessages(['id'=>'Invalid record ID.']);
         foreach (['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completion','updatedAt'] as $key) {
             if (isset($record[$key]) && !is_string($record[$key])) throw ValidationException::withMessages([$key=>"$key must be a date string."]);

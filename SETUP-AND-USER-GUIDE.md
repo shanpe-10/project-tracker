@@ -180,3 +180,9 @@ Database migration and commands: [POSTGRESQL-MIGRATION.md](POSTGRESQL-MIGRATION.
 
 
 
+
+## Manual operational status
+
+In the project editor, choose a status directly in the existing **Operational Status** dropdown and save. This choice takes priority over date calculations and scheduled status updates. Choose **Automatic** in the same dropdown to remove the override and recalculate from project dates. Project edit permissions still apply, and new Completed records require a Completion Date.
+
+CSV, Excel and backup workbooks include a **Manual Operational Status** column. A selected status preserves the override; a blank value uses Automatic. Older spreadsheets without this column retain an existing override when overwriting a project.

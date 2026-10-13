@@ -247,7 +247,8 @@ const importPreviewAliases = {
     swa: ["SWA", "22. SWA"], ldAmount: ["LD Amount", "23. LD Amount"],
     ldNewCompletionDate: ["Extended Completion Date", "23. New Extended Completion Date"],
     completion: ["Completion Date", "24. Completion Date"],
-    status: ["Operational Status", "25. Operational Status"]
+    status: ["Operational Status", "25. Operational Status"],
+    manualStatus: ["Manual Operational Status"]
 };
 
 function importPreviewValue(row, field) {
@@ -614,6 +615,7 @@ function handleExcelImport(event) {
                 "Extended Completion Date": "ldNewCompletionDate",
                 "Actual Construction Duration": "ldActualDuration",
                 "Completion Date": "completion", "Operational Status": "status",
+                "Manual Operational Status": "manualStatus",
                 "Additional Remarks": "remarks"
             };
             const isServerExport = rawRows[0]["Project No."] !== undefined &&
@@ -622,7 +624,7 @@ function handleExcelImport(event) {
             const importRows = isServerExport ? rawRows.map(row => {
                 const mapped = { "Project No.": row["Project No."] };
                 Object.entries(exportedColumns).forEach(([heading, field]) => {
-                    if (["materialTestingDate", "noaDueDate"].includes(field) && !Object.hasOwn(row, heading)) return;
+                    if (["materialTestingDate", "noaDueDate", "manualStatus"].includes(field) && !Object.hasOwn(row, heading)) return;
                     mapped[field] = row[heading] ?? "";
                 });
                 return mapped;
@@ -699,6 +701,7 @@ const importMoneyFields = ["approvedBudget", "bidAmount", "ldAmount"];
 
 function validateImportedProject(payload, rowNumber) {
     const errors = [];
+    if (payload.manualStatus && !["Pending", "On-going Bidding", "Pre-inspection", "Final-inspection", "Completed", "Released"].includes(payload.manualStatus)) errors.push("Choose a valid manual operational status");
     if (!String(payload.title || "").trim() || payload.title === "Imported Unnamed Project") errors.push("Project title is required");
     importDateFields.forEach(field => {
         const value = String(payload[field] || "").trim();
@@ -1198,6 +1201,9 @@ getAllRequest.onsuccess =
                         new Date()
                             .toISOString();
 
+                    if (["manualStatus", "Manual Operational Status"].some(key => Object.hasOwn(row, key))) {
+                        payload.manualStatus = String(importPreviewValue(row, "manualStatus")).trim() || null;
+                    }
                     const rowErrors = validateImportedProject(payload, index + 2);
                     const normalizedTitle = String(payload.title || "").trim().toLowerCase().replace(/\s+/g, " ");
                     const normalizedProjectNo = String(payload.projectNo || "").trim().toLowerCase();

@@ -103,7 +103,8 @@ Artisan::command('tracker:project-status-sync', function () {
         foreach($rows as $item) DB::transaction(function()use($item,&$changed){
             $row=DB::table('projects')->where('id',$item->id)->lockForUpdate()->first();if(!$row)return;
             $record=json_decode($row->data,true)?:[];
-            $status=\App\Support\TrackerProjectInput::automaticStatus($record);
+            if (!empty($record['manualStatus'])) return;
+            $status=\App\Support\TrackerProjectInput::effectiveStatus($record);
             if(($record['status']??'')===$status)return;
             $record['status']=$status;$record['updatedAt']=now('UTC')->format('Y-m-d\TH:i:s.v\Z');
             DB::table('projects')->where('id',$row->id)->update(['data'=>json_encode($record,JSON_UNESCAPED_UNICODE),'project_status'=>$status,'updated_at'=>now()]);
