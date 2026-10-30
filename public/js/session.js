@@ -63,6 +63,7 @@
                 // Tabs share the browser cookie. Refresh their CSRF token after a new login.
                 window.sessionCsrfToken = result.csrfToken;
                 if (result.user.role !== window.currentUser.role) applyAuthenticatedUser(result.user, result.csrfToken);
+                else if (JSON.stringify(result.user) !== JSON.stringify(window.currentUser)) applyAuthenticatedUser(result.user, result.csrfToken, null, true);
                 timing(result.sessionTiming);
             }
         } catch (_) {

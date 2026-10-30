@@ -4,7 +4,7 @@ use Illuminate\Support\Facades\DB;
 class AuditRegressionTest extends ComprehensiveUatTest
 {
     private function requestData(array $body, int $user = 1) {
-        return $this->withTrackerSession(['tracker_user'=>['id'=>$user],'tracker_csrf'=>'audit-token','tracker_created_at'=>time(),'tracker_last_activity'=>time()])->withHeader('X-CSRF-Token','audit-token')->postJson('/api/data.php',$body);
+        $response = $this->withSession(['tracker_user'=>['id'=>$user],'tracker_csrf'=>'audit-token','tracker_created_at'=>time(),'tracker_last_activity'=>time()])->withHeader('X-CSRF-Token','audit-token')->postJson('/api/data.php',$body); return $this->finishImportFixture($response,$body);
     }
     private function imported(string $batch='audit_import_01'): array {
         $this->requestData(['action'=>'bulkSaveProjects','batchId'=>$batch,'records'=>[['title'=>'Original','projectNo'=>'123','status'=>'Pending']]])->assertOk();
@@ -28,6 +28,9 @@ class AuditRegressionTest extends ComprehensiveUatTest
         $record=$this->imported();
         DB::table('users')->insert(['id'=>2,'username'=>'resolver','full_name'=>'Resolver','password_hash'=>'hash','role'=>'staff','active'=>true,'can_resolve_alerts'=>true]);
         $record['timelineAlertsCompleted']=['noa-warning'];
+        $stored=$record; unset($stored['id']);
+        DB::table('projects')->where('id',$record['id'])->update(['data'=>json_encode($stored)]);
+        $record['timelineAlertsCompleted']=[]; // Restore an existing historical dismissal; new manual resolutions are rejected.
         $saved=$this->requestData(['action'=>'saveProject','record'=>$record],2)->assertOk()->json('record');
         $saved['title']='Unauthorized';$this->requestData(['action'=>'saveProject','record'=>$saved],2)->assertForbidden();
         $this->assertSame('Original',DB::table('projects')->value('title'));
@@ -40,7 +43,7 @@ class AuditRegressionTest extends ComprehensiveUatTest
         $this->assertSame('0',\App\Http\Controllers\TrackerDataController::projectColumns(['projectNo'=>'0'])['project_no']);
     }
     public function test_expired_session_cannot_use_auth_admin_endpoint(): void {
-        $this->withTrackerSession(['tracker_user'=>['id'=>1],'tracker_csrf'=>'audit-token','tracker_created_at'=>time()-28801,'tracker_last_activity'=>time()])->withHeader('X-CSRF-Token','audit-token')->postJson('/api/auth.php',['action'=>'listManagedUsers'])->assertUnauthorized();
+        $this->withSession(['tracker_user'=>['id'=>1],'tracker_csrf'=>'audit-token','tracker_created_at'=>time()-28801,'tracker_last_activity'=>time()])->withHeader('X-CSRF-Token','audit-token')->postJson('/api/auth.php',['action'=>'listManagedUsers'])->assertUnauthorized();
     }
     public function test_regular_edits_preserve_attachment_archive_and_number_metadata(): void {
         $record=$this->imported();
@@ -72,12 +75,12 @@ class AuditRegressionTest extends ComprehensiveUatTest
         $before = is_file($settingsPath) ? hash_file('sha256',$settingsPath) : null;
         try {
             $session = ['tracker_user'=>['id'=>1], 'tracker_csrf'=>'picker-token', 'tracker_created_at'=>time(), 'tracker_last_activity'=>time()];
-            $this->withTrackerSession($session)->withHeader('X-CSRF-Token','picker-token')
+            $this->withSession($session)->withHeader('X-CSRF-Token','picker-token')
                 ->postJson('/api/backups.php',['action'=>'browseDestination','path'=>$folder])
                 ->assertOk()->assertJsonPath('selected',false)->assertJsonPath('directories.0.name','child')
                 ->assertJsonCount(1,'directories')->assertJsonPath('path',realpath($folder));
             foreach ([['invalid-array'], false, 123, 'relative-folder', $folder.'-missing', "D:\\\\bad\0path"] as $invalid) {
-                $this->withTrackerSession($session)->withHeader('X-CSRF-Token','picker-token')
+                $this->withSession($session)->withHeader('X-CSRF-Token','picker-token')
                     ->postJson('/api/backups.php',['action'=>'browseDestination','path'=>$invalid])->assertStatus(422);
             }
             $this->assertSame($before,is_file($settingsPath) ? hash_file('sha256',$settingsPath) : null);
@@ -87,7 +90,7 @@ class AuditRegressionTest extends ComprehensiveUatTest
     public function test_service_folder_picker_requires_an_administrator(): void {
         DB::table('users')->insert(['id'=>2,'username'=>'picker-staff','full_name'=>'Picker Staff','password_hash'=>'hash','role'=>'staff','active'=>true]);
         $session = ['tracker_user'=>['id'=>2], 'tracker_csrf'=>'picker-token', 'tracker_created_at'=>time(), 'tracker_last_activity'=>time()];
-        $this->withTrackerSession($session)->withHeader('X-CSRF-Token','picker-token')
+        $this->withSession($session)->withHeader('X-CSRF-Token','picker-token')
             ->postJson('/api/backups.php',['action'=>'browseDestination','path'=>sys_get_temp_dir()])->assertForbidden();
     }
 }

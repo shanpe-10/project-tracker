@@ -6,17 +6,17 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
-class BootstrapPilot extends Command
+class BootstrapCloud extends Command
 {
-    protected $signature = 'tracker:bootstrap-pilot';
-    protected $description = 'Create the first superadmin in an empty pilot database from private environment variables';
+    protected $signature = 'tracker:bootstrap-cloud';
+    protected $description = 'Create the first superadmin in an empty cloud database from private environment variables';
 
     public function handle(): int
     {
         return DB::transaction(function (): int {
             DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ['tracker:create-superadmin']);
             if (DB::table('users')->exists()) {
-                $this->info('Existing accounts retained. Pilot bootstrap skipped.');
+                $this->info('Existing accounts retained. Cloud bootstrap skipped.');
                 return self::SUCCESS;
             }
             $name = trim((string) getenv('TRACKER_BOOTSTRAP_NAME'));
@@ -27,9 +27,9 @@ class BootstrapPilot extends Command
                 $this->error('Set a valid TRACKER_BOOTSTRAP_NAME, USERNAME and PASSWORD in the private service environment. The password needs at least 12 characters and at most 72 bytes.');
                 return self::FAILURE;
             }
-            DB::table('users')->insert(['username'=>$username, 'full_name'=>$name, 'password_hash'=>Hash::make($password),
+            DB::table('users')->insert(['username'=>$username, 'full_name'=>$name, 'password_hash'=>Hash::make($password), 'password_encrypted'=>\Illuminate\Support\Facades\Crypt::encryptString($password),
                 'role'=>'superadmin', 'active'=>true, 'created_at'=>now()]);
-            $this->info('First pilot superadmin created. Remove the bootstrap password from the service environment.');
+            $this->info('First cloud superadmin created. Remove the bootstrap password from the service environment.');
             return self::SUCCESS;
         });
     }

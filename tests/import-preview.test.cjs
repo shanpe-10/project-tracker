@@ -9,11 +9,14 @@ const button = { disabled: false };
 const elements = { importPreviewTable: table, importPreviewSummary: summary, continueImportPreviewButton: button, importPreviewModal: {} };
 const context = vm.createContext({ Date, console, setTimeout, clearTimeout, URLSearchParams });
 context.window = context;
+vm.runInContext(fs.readFileSync(path.join(__dirname,'../public/js/utils.js'),'utf8'),context);
 context.document = { getElementById(id) { return elements[id] || null; }, addEventListener() {} };
 context.XLSX = { SSF: { parse_date_code() { return null; } } };
 context.escapeHtml = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
 context.getNextProjectNumber = projects => Math.max(0, ...projects.map(project => Number.parseInt(project.projectNo, 10) || 0)) + 1;
 context.bootstrap = { Modal: { getInstance() { return { hide() {} }; } } };
+const projectValidation = fs.readFileSync(path.join(__dirname, '../public/js/projects.js'),'utf8');
+vm.runInContext(projectValidation.slice(projectValidation.indexOf('function validateProjectNumbersAndActualDates('),projectValidation.indexOf('function saveDocument(')),context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/js/excel.js'), 'utf8'), context);
 
 vm.runInContext(`
@@ -34,7 +37,7 @@ assert.match(table.innerHTML, /New project no\.<input[^>]+value="15" readonly/);
 assert.match(table.innerHTML, /Original spreadsheet no\. 12/);
 assert.match(summary.innerHTML, /1.*existing matches/);
 assert.match(summary.innerHTML, /1.*invalid/);
-assert.equal(button.disabled, false);
+assert.equal(button.disabled, true);
 
 vm.runInContext(`importPreviewChoices.set(0, { action: 'overwrite', existingId: 7 }); renderImportPreview();`, context);
 assert.match(table.innerHTML, /value="overwrite" selected/);

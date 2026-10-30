@@ -41,7 +41,7 @@ Artisan::command('tracker:create-admin', function () {
         }
         DB::table('users')->insert([
             'username' => $username, 'full_name' => $name,
-            'password_hash' => Hash::make($password), 'role' => 'admin',
+            'password_hash' => Hash::make($password), 'password_encrypted' => \Illuminate\Support\Facades\Crypt::encryptString($password), 'role' => 'admin',
             'active' => true, 'created_at' => now(),
         ]);
     });
@@ -73,7 +73,7 @@ Artisan::command('tracker:create-superadmin', function () {
         }
         DB::table('users')->insert([
             'username' => $username, 'full_name' => $name,
-            'password_hash' => Hash::make($password), 'role' => 'superadmin',
+            'password_hash' => Hash::make($password), 'password_encrypted' => \Illuminate\Support\Facades\Crypt::encryptString($password), 'role' => 'superadmin',
             'active' => true, 'created_at' => now(),
         ]);
     });
@@ -98,20 +98,7 @@ Schedule::command('tracker:holidays-sync')->hourlyAt(0)->timezone('Asia/Manila')
     ->when(fn () => now('Asia/Manila')->hour >= 3);
 
 Artisan::command('tracker:project-status-sync', function () {
-    $changed=0;
-    DB::table('projects')->whereNull('archived_at')->select('id')->orderBy('id')->chunkById(200,function($rows)use(&$changed){
-        foreach($rows as $item) DB::transaction(function()use($item,&$changed){
-            $row=DB::table('projects')->where('id',$item->id)->lockForUpdate()->first();if(!$row)return;
-            $record=json_decode($row->data,true)?:[];
-            if (!empty($record['manualStatus'])) return;
-            $status=\App\Support\TrackerProjectInput::effectiveStatus($record);
-            if(($record['status']??'')===$status)return;
-            $record['status']=$status;$record['updatedAt']=now('UTC')->format('Y-m-d\TH:i:s.v\Z');
-            DB::table('projects')->where('id',$row->id)->update(['data'=>json_encode($record,JSON_UNESCAPED_UNICODE),'project_status'=>$status,'updated_at'=>now()]);
-            DB::table('audit_log')->insert(['actor_id'=>null,'actor_username'=>'System','action'=>'project.status.auto','entity_type'=>'project','entity_id'=>$row->id,'summary'=>'Automatically changed status to '.$status.'.','created_at'=>now()]);
-            $changed++;
-        });
-    });
+    $changed = \App\Support\TrackerProjectStatus::refresh();
     $this->info('Updated '.$changed.' project statuses.');
 });
 Schedule::command('tracker:project-status-sync')->everyMinute()->withoutOverlapping(5);

@@ -1,4 +1,4 @@
-/* Superadmin manages accounts; Admin has all project and operational permissions. */
+/* Superadmin manages accounts; Admin handles project operations and deletion approvals. */
 window.pendingAccountRequests = [];
 
 function renderPendingAccountNotification() {
@@ -136,8 +136,8 @@ function buildPermissionPopover(account) {
         ["canEdit", "Edit projects"],
         ["canImport", "Import Excel"],
         ["canExport", "Export Excel"],
-        ["canDelete", "Delete projects"],
-        ["canDeleteAll", "Delete all records"],
+        ["canDelete", "Request project deletion"],
+        ["canDeleteAll", "Request deletion of all records"],
         ["canResolveAlerts", "Restore historical alerts"],
         ["canArchive", "Archive projects"],
     ].forEach(([permission, label]) => {
@@ -171,55 +171,90 @@ document.addEventListener("click", event => {
     }
 });
 
+function accountIcon(name) {
+    const paths = {
+        key: '<circle cx="8" cy="8" r="4"/><path d="m11 11 9 9m-4-4 3-3m-6 0 3-3"/>',
+        edit: '<path d="m16 3 5 5M4 20l4-1L21 6a2 2 0 0 0-5-3L3 16l-1 5Z"/>',
+        shield: '<path d="M12 3 3 7v5c0 5 9 9 9 9s9-4 9-9V7Z"/><path d="m8 12 3 3 5-6"/>',
+        trash: '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
+        lock: '<rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/>',
+        plus: '<path d="M12 5v14M5 12h14"/>',
+        search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/>',
+        users: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
+    };
+    return `<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.key}</svg>`;
+}
+
+function filterAccountDirectory() {
+    const query = document.getElementById('accountDirectorySearch')?.value.trim().toLocaleLowerCase() || '';
+    const rows = [...document.querySelectorAll('#accountRequestsList tr[data-account-search]')];
+    let shown = 0;
+    rows.forEach(row => { row.hidden = !row.dataset.accountSearch.includes(query); if (!row.hidden) shown++; });
+    const empty = document.getElementById('accountDirectoryEmpty');
+    if (empty) empty.hidden = shown !== 0;
+    const summary = document.getElementById('accountDirectorySummary');
+    if (summary) summary.textContent = query ? `${shown} of ${rows.length} accounts` : `${rows.length} accounts · ${rows.filter(row => row.dataset.active === 'true').length} active`;
+}
+
 async function loadAccountRequests() {
     if (window.currentUser?.role !== "superadmin") return;
     const list = document.getElementById("accountRequestsList");
     if (!list) return;
-    list.replaceChildren();
     setAccountRequestsMessage("Loading accounts…");
     try {
         const result = await authRequest("listManagedUsers");
-        if (!result.ok) throw new Error(result.message || "Unable to load staff accounts.");
+        if (!result.ok) throw new Error(result.message || "Unable to load accounts.");
         updatePendingAccountRequests(result.users);
-        if (!result.users.length) { setAccountRequestsMessage("There are no accounts."); loadAuditLog(); loadBackupSettings(); return; }
+        list.replaceChildren();
         setAccountRequestsMessage("");
-        const summary = document.getElementById("accountDirectorySummary");
-        if (summary) summary.textContent = `${result.users.length} account${result.users.length === 1 ? "" : "s"}`;
         result.users.forEach(account => {
             const row = document.createElement("tr");
-            const role = account.role === "superadmin" ? "Superadmin" : account.role === "admin" ? "Admin" : "Staff";
-            const enabledPermissions = [account.canCreate && "Add", account.canEdit && "Edit", account.canImport && "Import", account.canExport && "Export", account.canDelete && "Delete", account.canDeleteAll && "Delete all", account.canResolveAlerts && "Resolve alerts", account.canArchive && "Archive"].filter(Boolean);
-            const access = account.role === "superadmin" ? "Account management" : account.role === "admin" ? "All project operations, timeline, activity and backups" : !account.active ? "Awaiting review" : enabledPermissions.length ? enabledPermissions.join(", ") : "View only";
+            row.dataset.accountSearch = `${account.fullName} ${account.username} ${account.role}`.toLocaleLowerCase();
+            row.dataset.active = String(account.active);
             const cell = (label, className = "") => {
-                const td = document.createElement("td");
-                td.dataset.label = label;
-                td.className = className;
-                row.append(td);
-                return td;
+                const td = document.createElement("td"); td.dataset.label = label; td.className = className; row.append(td); return td;
             };
             const initial = (account.fullName || account.username || "U").trim().charAt(0).toUpperCase();
-            cell("Full name", "account-user-cell").innerHTML = `<span class="account-user-content"><span class="account-user-avatar">${account.profilePhoto ? `<img src="${account.profilePhoto}" alt="">` : escapeHtml(initial)}</span><span>${escapeHtml(account.fullName)}</span></span>`;
-            cell("Username", "account-username").textContent = account.username;
-            cell("Role").innerHTML = `<span class="account-role-badge">${escapeHtml(role)}</span>${account.isOriginalSuperadmin ? '<small class="d-block text-muted">Original account · protected</small>' : ""}`;
-            cell("Status / access", "account-access-cell").innerHTML = `<span class="account-state ${account.active ? "is-active" : "is-pending"}">${account.active ? "Active" : "Pending approval"}</span><span class="account-access-summary">${escapeHtml(access)}</span>`;
             const created = new Date(account.createdAt);
-            cell("Created", "account-created-cell").innerHTML = Number.isNaN(created.getTime()) ? "—" : `<span>${escapeHtml(created.toLocaleDateString("en-US", {timeZone:"Asia/Taipei",month:"short",day:"2-digit",year:"numeric"}))}</span><small>${escapeHtml(created.toLocaleTimeString("en-US", {timeZone:"Asia/Taipei",hour:"numeric",minute:"2-digit"}))}</small>`;
-            const actions = document.createElement("div");
-            actions.className = "account-actions";
-            cell("Actions", "account-actions-cell").append(actions);
-            addAccountAction(actions, "Edit", "btn-outline-primary", () => openAccountEditor(account));
+            const date = Number.isNaN(created.getTime()) ? '' : created.toLocaleDateString('en-US', {timeZone:'Asia/Taipei',month:'short',day:'numeric',year:'numeric'});
+            const protectedLabel = account.isOriginalSuperadmin ? `<span class="account-protected" title="The original Superadmin account cannot be deleted">${accountIcon('lock')}<span>Protected</span></span>` : '';
+            cell('Account', 'account-user-cell').innerHTML = `<span class="account-user-content"><span class="account-user-avatar">${account.profilePhoto ? `<img src="${escapeHtml(account.profilePhoto)}" alt="">` : escapeHtml(initial)}</span><span class="account-identity"><strong>${escapeHtml(account.fullName)}${protectedLabel}</strong><span class="account-username">@${escapeHtml(account.username)}</span><small class="account-added">Added ${escapeHtml(date)}</small></span></span>`;
+            const role = ({superadmin:'Superadmin',admin:'Admin',staff:'Staff'})[account.role];
+            const permissionCount = ['canCreate','canEdit','canImport','canExport','canDelete','canDeleteAll','canResolveAlerts','canArchive'].filter(key => account[key]).length;
+            const access = account.role === 'superadmin' ? 'Accounts & calendar' : account.role === 'admin' ? 'Full project access' : permissionCount ? `${permissionCount} permissions enabled` : 'View only';
+            cell('Access', 'account-access-cell').innerHTML = `<div class="account-access-top"><span class="account-role-badge is-${account.role}">${role}</span><span class="account-state ${account.active ? 'is-active':'is-pending'}">${account.active ? 'Active':'Pending'}</span></div><span class="account-access-summary">${escapeHtml(access)}</span>`;
+            const password = cell('Password', 'account-password-cell');
+            const passwordButton = document.createElement('button'); passwordButton.type='button'; passwordButton.className='account-password-button';
+            passwordButton.innerHTML=`${accountIcon('key')}<span>${account.passwordAvailable ? 'View password':'Manage password'}</span>`;
+            passwordButton.onclick=()=>openUserPasswordViewer(account);
+            const availability=document.createElement('small'); availability.className=`account-password-status ${account.passwordAvailable ? 'is-ready':''}`;
+            availability.textContent=account.passwordAvailable ? 'Ready to view':'Available after sign-in';
+            password.append(passwordButton, availability);
+            const actions = document.createElement('div'); actions.className='account-actions'; cell('Actions','account-actions-cell').append(actions);
+            addAccountAction(actions,'Edit','account-edit-action',()=>openAccountEditor(account));
+            actions.lastElementChild.innerHTML=`${accountIcon('edit')}<span>Edit</span>`;
             if (!account.active) {
-                addAccountAction(actions, "Approve", "btn-success", () => reviewAccountRequest(account.id, "approve", account.username));
-                addAccountAction(actions, "Reject", "btn-outline-danger", () => reviewAccountRequest(account.id, "reject", account.username), account.isOriginalSuperadmin === true, "The original Superadmin account cannot be deleted.");
+                addAccountAction(actions,'Approve','btn-success',()=>reviewAccountRequest(account.id,'approve',account.username));
+                if (!account.isOriginalSuperadmin) addAccountAction(actions,'Reject','btn-outline-danger',()=>reviewAccountRequest(account.id,'reject',account.username));
             } else {
-                if (account.role === "staff") addPermissionDropdown(actions, account);
-                addAccountAction(actions, "Delete", "btn-outline-danger", () => deleteStaffAccount(account.id, account.username), account.isOriginalSuperadmin === true || account.id === window.currentUser.id, account.isOriginalSuperadmin ? "The original Superadmin account cannot be deleted." : "You cannot delete your signed-in account.");
+                if (account.role==='staff') {
+                    addPermissionDropdown(actions,account);
+                    const button=actions.lastElementChild; button.innerHTML=accountIcon('shield'); button.className='btn btn-sm account-icon-action permission-dropdown-button';
+                    button.title='Manage permissions'; button.setAttribute('aria-label',`Permissions for ${account.username}`);
+                }
+                if (!account.isOriginalSuperadmin && account.id!==window.currentUser.id) {
+                    addAccountAction(actions,'Delete','account-icon-action account-delete-action',()=>deleteStaffAccount(account.id,account.username));
+                    const button=actions.lastElementChild; button.innerHTML=accountIcon('trash'); button.title='Delete account'; button.setAttribute('aria-label',`Delete ${account.username}`);
+                }
             }
             list.append(row);
         });
-
+        const empty=document.createElement('tr'); empty.id='accountDirectoryEmpty'; empty.hidden=true;
+        const message=document.createElement('td'); message.colSpan=4; message.className='account-directory-empty'; message.textContent='No matching accounts. Try a different name or username.'; empty.append(message); list.append(empty);
+        filterAccountDirectory();
     } catch (error) { setAccountRequestsMessage(error.message); }
 }
+
 
 let defaultBackupDestination = "";
 
@@ -248,10 +283,11 @@ function renderBackupSettings(result) {
     const status = document.getElementById("backupSettingsStatus");
     if (toggle) toggle.checked = result.enabled === true;
     if (destination) destination.value = result.destination || defaultBackupDestination;
+    if (destination) destination.readOnly = result.cloud === true;
+    const download = document.getElementById('downloadLatestBackup');
+    if (download) download.hidden = !(result.cloud && result.latest);
     updateBackupToggleLabel();
     if (status) status.textContent = result.latest ? `Latest: ${new Date(result.latest.createdAt).toLocaleString()} · ${formatBackupSize(result.latest.size)} · ${result.latest.name}` : "No backup has been created in this destination yet.";
-    const download = document.getElementById("downloadLatestBackup");
-    if (download) download.hidden = !(result.cloud && result.latest);
 }
 
 async function loadBackupSettings() {
@@ -503,42 +539,144 @@ async function deleteStaffAccount(id, username) {
     } catch (error) { showSystemNotification(error.message); }
 }
 
-function openAccountEditor(account = null) {
-    if (window.currentUser?.role !== "superadmin") return;
-    const container = document.createElement("div");
-    container.className = "modal fade";
-    container.tabIndex = -1;
-    container.innerHTML = `<div class="modal-dialog"><form class="modal-content" id="accountEditorForm">
-        <div class="modal-header"><h5 class="modal-title">${account ? "Edit" : "Create"} account</h5><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
-        <div class="modal-body"><div class="account-editor-grid">
-        <label>Full name<input class="form-control" name="fullName" required maxlength="160"></label>
-        <label>Username<input class="form-control" name="username" required pattern="[A-Za-z0-9._-]{3,80}" maxlength="80" autocomplete="off"></label>
-        <label>Role<select class="form-select" name="role"><option value="staff">Staff</option><option value="admin">Admin</option><option value="superadmin">Superadmin</option></select></label>
-        <label>Password${account ? " (leave blank to keep current)" : ""}<input class="form-control" name="password" type="password" minlength="12" autocomplete="new-password" aria-describedby="accountPasswordHint" ${account ? "" : "required"}><span id="accountPasswordHint" class="form-text d-block">At least 12 characters.</span></label>
-        <label class="form-check"><input class="form-check-input" name="active" type="checkbox"> Active account</label>
-        </div><p class="text-danger mt-3 mb-0" role="alert" data-account-error></p></div>
-        <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">Save account</button></div>
+function openAllUserPasswords() {
+    if (window.currentUser?.role !== 'superadmin') return;
+    document.querySelector('#allPasswordsForm')?.closest('.modal')?.querySelector('[data-bs-dismiss=modal]')?.click();
+    const userId=window.currentUser.id, csrf=window.sessionCsrfToken;
+    const container=document.createElement('div');container.className='modal fade account-dialog all-passwords-dialog';container.tabIndex=-1;
+    container.setAttribute('aria-labelledby','allPasswordsTitle');
+    container.innerHTML=`<div class="modal-dialog modal-dialog-centered modal-dialog-scrollable"><form class="modal-content" id="allPasswordsForm">
+        <div class="modal-header"><div><span class="account-dialog-eyebrow">Superadmin access</span><h5 class="modal-title" id="allPasswordsTitle">All user passwords</h5></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><section data-all-passwords-prompt><div class="all-passwords-intro"><span class="account-dialog-symbol">${accountIcon('lock')}</span><p>Enter your Superadmin password to view every account’s saved password.</p></div><label class="form-label" for="allPasswordsCurrent">Your Superadmin password</label><input id="allPasswordsCurrent" class="form-control" type="password" name="currentPassword" autocomplete="current-password" required><p class="account-dialog-note">You must verify your password each time you open this list. Access is recorded.</p></section>
+        <section data-all-passwords-result hidden><div class="all-passwords-summary"><strong data-all-passwords-count></strong><span>Automatically hidden after 30 seconds</span></div><div class="account-password-expiry" aria-hidden="true"><span></span></div><p class="all-passwords-unavailable" data-all-passwords-unavailable hidden>Some older accounts have only password hashes saved. Their passwords become viewable after each user signs in once, or after you set a new password.</p><table class="all-passwords-table" aria-label="User passwords"><thead><tr><th scope="col">Account</th><th scope="col">Password</th></tr></thead><tbody data-all-passwords-list></tbody></table></section>
+        <p class="account-dialog-error" role="alert" data-all-passwords-error hidden></p></div>
+        <div class="modal-footer"><button type="button" class="btn account-cancel-button" data-bs-dismiss="modal">Close</button><button type="submit" class="btn btn-primary">${accountIcon('lock')}<span>View all passwords</span></button></div>
     </form></div>`;
     document.body.append(container);
-    const form = container.querySelector("form");
-    for (const key of ["fullName","username","role"]) form.elements[key].value = account?.[key] || (key === "role" ? "staff" : "");
-    form.elements.active.checked = account ? account.active : true;
-    const modal = new bootstrap.Modal(container);
-    form.addEventListener("submit", async event => {
-        event.preventDefault();
-        const button = form.querySelector('[type="submit"]');
-        button.disabled = true;
-        const body = Object.fromEntries(new FormData(form));
-        body.active = form.elements.active.checked;
-        if (account) body.id = account.id;
-        if (!body.password) delete body.password;
+    const form=container.querySelector('form'), modal=new bootstrap.Modal(container), current=form.elements.currentPassword;
+    const prompt=container.querySelector('[data-all-passwords-prompt]'), resultBox=container.querySelector('[data-all-passwords-result]');
+    const list=container.querySelector('[data-all-passwords-list]'), count=container.querySelector('[data-all-passwords-count]'), notice=container.querySelector('[data-all-passwords-unavailable]');
+    const error=container.querySelector('[data-all-passwords-error]'), submit=form.querySelector('[type=submit]');
+    let timer;
+    const clear=()=>{clearTimeout(timer);list.replaceChildren();count.textContent='';current.value='';resultBox.hidden=true;prompt.hidden=false;submit.hidden=false;current.required=true;notice.hidden=true;};
+    const identityTimer=setInterval(()=>{if(userId!==window.currentUser?.id||window.currentUser?.role!=='superadmin'||csrf!==window.sessionCsrfToken){clear();modal.hide();}},500);
+    const visibility=()=>{if(document.hidden)clear();};document.addEventListener('visibilitychange',visibility);
+    form.addEventListener('submit',async event=>{
+        event.preventDefault();submit.disabled=true;error.hidden=true;
         try {
-            const result = await authRequest(account ? "updateUser" : "createUser", body);
-            if (!result.ok) throw new Error(Object.values(result.errors || {}).flat().join(" ") || result.message || "Unable to save account.");
-            modal.hide(); loadAccountRequests(); refreshPendingAccountNotifications(); showSystemNotification(result.message);
-        } catch (error) { container.querySelector('[data-account-error]').textContent = error.message; }
-        finally { button.disabled = false; }
+            const response=await authRequest('revealAllUserPasswords',{currentPassword:current.value});current.value='';
+            if(!container.isConnected||!container.classList.contains('show')||userId!==window.currentUser?.id||window.currentUser?.role!=='superadmin'||csrf!==window.sessionCsrfToken||document.hidden)return;
+            if(!response.ok)throw new Error(response.message||'Unable to view passwords.');
+            list.replaceChildren();
+            for(const account of response.accounts) {
+                const row=document.createElement('tr'),identity=document.createElement('td'),password=document.createElement('td');
+                const name=document.createElement('strong');name.textContent=account.fullName;
+                const username=document.createElement('span');username.textContent='@'+account.username;
+                identity.className='all-passwords-identity';identity.append(name,username);
+                if(account.passwordAvailable) {
+                    const value=document.createElement('code');value.className='all-password-value';value.textContent=account.password;password.append(value);
+                } else {const waiting=document.createElement('span');waiting.className='all-passwords-waiting';waiting.textContent='Available after next sign-in';password.append(waiting);}
+                account.password='';row.append(identity,password);list.append(row);
+            }
+            response.accounts=[];
+            count.textContent=`${response.availableCount} of ${response.total} passwords available`;
+            notice.hidden=response.availableCount===response.total;
+            prompt.hidden=true;current.required=false;submit.hidden=true;resultBox.hidden=false;
+            clearTimeout(timer);timer=setTimeout(clear,30000);
+        }catch(failure){error.textContent=failure.message;error.hidden=false;current.focus();}
+        finally{current.value='';submit.disabled=false;}
     });
-    container.addEventListener("hidden.bs.modal", () => { modal.dispose(); container.remove(); }, {once:true});
+    container.addEventListener('hide.bs.modal',clear);
+    container.addEventListener('hidden.bs.modal',()=>{clear();clearInterval(identityTimer);document.removeEventListener('visibilitychange',visibility);modal.dispose();container.remove();},{once:true});
+    container.addEventListener('shown.bs.modal',()=>current.focus(),{once:true});
     modal.show();
 }
+
+function openUserPasswordViewer(account) {
+    if (window.currentUser?.role !== 'superadmin') return;
+    const userId=window.currentUser.id, csrf=window.sessionCsrfToken;
+    const container=document.createElement('div'); container.className='modal fade account-dialog'; container.tabIndex=-1;
+    container.setAttribute('aria-labelledby','passwordViewerTitle');
+    container.innerHTML=`<div class="modal-dialog modal-dialog-centered"><form class="modal-content" id="passwordViewerForm">
+        <div class="modal-header"><div><span class="account-dialog-eyebrow">Account security</span><h5 class="modal-title" id="passwordViewerTitle">User password</h5></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body"><div class="account-dialog-person"><span class="account-dialog-symbol">${accountIcon('key')}</span><div><strong data-password-name></strong><span data-password-username></span></div></div>
+        <section data-password-pending hidden><div class="account-password-info"><span class="account-info-label">Available after next sign-in</span><p>This password was saved before password viewing was enabled. It will become available after this user signs in again.</p></div><p class="account-dialog-note">Need access sooner? Set a new password for this account.</p></section>
+        <section data-password-ready><p class="account-dialog-description">Confirm your identity to view this password.</p><label class="form-label" for="passwordViewerCurrent">Your Superadmin password</label><input id="passwordViewerCurrent" class="form-control" type="password" name="currentPassword" autocomplete="current-password" required><p class="account-dialog-note">This access is recorded in the activity log.</p></section>
+        <section data-password-result hidden><div class="account-password-result-heading"><label for="passwordViewerValue">User password</label><span>Visible for 30 seconds</span></div><input id="passwordViewerValue" class="form-control account-revealed-password" type="text" readonly autocomplete="off"><div class="account-password-expiry" aria-hidden="true"><span></span></div><p class="account-dialog-note">The password is automatically hidden when you close this window or leave the tab.</p></section>
+        <p class="account-dialog-error" role="alert" data-password-error hidden></p></div>
+        <div class="modal-footer"><button type="button" class="btn account-cancel-button" data-bs-dismiss="modal">Close</button><button type="button" class="btn btn-primary" data-password-reset hidden>Set new password</button><button type="submit" class="btn btn-primary">${accountIcon('lock')}<span>Reveal password</span></button></div>
+    </form></div>`;
+    container.querySelector('[data-password-name]').textContent=account.fullName;
+    container.querySelector('[data-password-username]').textContent='@'+account.username;
+    document.body.append(container);
+    const form=container.querySelector('form'), modal=new bootstrap.Modal(container);
+    const value=container.querySelector('#passwordViewerValue'), current=form.elements.currentPassword;
+    const ready=container.querySelector('[data-password-ready]'), pending=container.querySelector('[data-password-pending]'), resultBox=container.querySelector('[data-password-result]');
+    const submit=form.querySelector('[type=submit]'), reset=container.querySelector('[data-password-reset]'), error=container.querySelector('[data-password-error]');
+    let timer, available=account.passwordAvailable===true;
+    const render=()=>{ready.hidden=!available; pending.hidden=available; current.disabled=!available; current.required=available; submit.hidden=!available; reset.hidden=available;};
+    const clear=()=>{clearTimeout(timer);value.value='';current.value='';resultBox.hidden=true;render();};
+    const close=()=>{clear();modal.hide();};
+    const identityTimer=setInterval(()=>{if(userId!==window.currentUser?.id||csrf!==window.sessionCsrfToken)close();},500);
+    const visibility=()=>{if(document.hidden)clear();}; document.addEventListener('visibilitychange',visibility);
+    reset.onclick=()=>{container.addEventListener('hidden.bs.modal',()=>openAccountEditor(account,{passwordOnly:true}),{once:true});close();};
+    form.addEventListener('submit',async event=>{
+        event.preventDefault(); if(!available)return;
+        submit.disabled=true;value.value='';resultBox.hidden=true;error.hidden=true;
+        try {
+            const result=await authRequest('revealUserPassword',{id:account.id,currentPassword:current.value}); current.value='';
+            if(!container.isConnected||!container.classList.contains('show')||userId!==window.currentUser?.id||csrf!==window.sessionCsrfToken||document.hidden)return;
+            if(result.passwordAvailable===false){available=false;render();void loadAccountRequests();return;}
+            if(!result.ok)throw new Error(result.message||'Unable to view password.');
+            value.value=result.password;result.password='';ready.hidden=true;submit.hidden=true;resultBox.hidden=false;
+            clearTimeout(timer);timer=setTimeout(clear,30000);
+        }catch(failure){error.textContent=failure.message;error.hidden=false;current.focus();}
+        finally{current.value='';submit.disabled=false;}
+    });
+    container.addEventListener('hide.bs.modal',clear);
+    container.addEventListener('hidden.bs.modal',()=>{clear();clearInterval(identityTimer);document.removeEventListener('visibilitychange',visibility);modal.dispose();container.remove();},{once:true});
+    container.addEventListener('shown.bs.modal',()=>{if(available)current.focus();else reset.focus();},{once:true});
+    render();modal.show();
+}
+
+function openAccountEditor(account=null,options={}) {
+    if(window.currentUser?.role!=='superadmin')return;
+    const passwordOnly=!!account&&options.passwordOnly===true;
+    const roles=['staff','admin','superadmin'];
+    const container=document.createElement('div');container.className='modal fade account-dialog';container.tabIndex=-1;
+    container.setAttribute('aria-labelledby','accountEditorTitle');
+    container.innerHTML=`<div class="modal-dialog modal-dialog-centered"><form class="modal-content" id="accountEditorForm">
+        <div class="modal-header"><div><span class="account-dialog-eyebrow">Account management</span><h5 class="modal-title" id="accountEditorTitle">${passwordOnly?'Set new password':account?'Edit account':'Create account'}</h5></div><button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button></div>
+        <div class="modal-body">${passwordOnly?'<div class="account-dialog-person"><span class="account-dialog-symbol">'+accountIcon('key')+'</span><div><strong data-editor-name></strong><span data-editor-username></span></div></div><p class="account-dialog-description">The user will use this new password the next time they sign in.</p>':''}<div class="account-editor-grid">
+        ${passwordOnly?'':`<label>Full name<input class="form-control" name="fullName" required maxlength="160" autocomplete="name"></label><label>Username<input class="form-control" name="username" required pattern="[A-Za-z0-9._-]{3,80}" maxlength="80" autocomplete="off"></label><label>Role<select class="form-select" name="role">${roles.map(role=>`<option value="${role}">${({staff:'Staff',admin:'Admin',superadmin:'Superadmin'})[role]}</option>`).join('')}</select></label>`}
+        <label>${passwordOnly?'New password':'Password'}${account&&!passwordOnly?' <span class="account-optional">(optional)</span>':''}<input class="form-control" name="password" type="password" minlength="12" autocomplete="new-password" aria-describedby="accountPasswordHint" ${!account||passwordOnly?'required':''}><span id="accountPasswordHint" class="account-dialog-note">${account&&!passwordOnly?'Leave blank to keep the current password.':'Use at least 12 characters.'}</span></label>
+        ${passwordOnly?'<label>Confirm new password<input class="form-control" name="passwordConfirmation" type="password" minlength="12" autocomplete="new-password" required></label>':'<label class="account-active-toggle"><input class="form-check-input" name="active" type="checkbox"><span>Active account<small>Allow this user to sign in.</small></span></label>'}
+        </div><p class="account-dialog-error" role="alert" data-account-error hidden></p></div>
+        <div class="modal-footer"><button type="button" class="btn account-cancel-button" data-bs-dismiss="modal">Cancel</button><button type="submit" class="btn btn-primary">${passwordOnly?'Save new password':'Save account'}</button></div>
+    </form></div>`;
+    document.body.append(container);
+    const form=container.querySelector('form'),modal=new bootstrap.Modal(container);
+    if(passwordOnly){container.querySelector('[data-editor-name]').textContent=account.fullName;container.querySelector('[data-editor-username]').textContent='@'+account.username;}
+    else {for(const key of ['fullName','username','role'])form.elements[key].value=account?.[key]||(key==='role'?'staff':'');form.elements.active.checked=account?account.active:true;}
+    form.addEventListener('submit',async event=>{
+        event.preventDefault();const error=container.querySelector('[data-account-error]');error.hidden=true;
+        if(passwordOnly&&form.elements.password.value!==form.elements.passwordConfirmation.value){error.textContent='The passwords do not match.';error.hidden=false;return;}
+        const button=form.querySelector('[type=submit]');button.disabled=true;
+        const body=passwordOnly?{id:account.id,fullName:account.fullName,username:account.username,role:account.role,active:account.active,password:form.elements.password.value}:Object.fromEntries(new FormData(form));
+        if(!passwordOnly)body.active=form.elements.active.checked;
+        if(account)body.id=account.id;
+        if(!body.password)delete body.password;
+        try {
+            const result=await authRequest(account?'updateUser':'createUser',body);
+            if(!result.ok)throw new Error(Object.values(result.errors||{}).flat().join(' ')||result.message||'Unable to save account.');
+            if (result.signInRequired) { modal.hide(); showLogin("Your password was changed. Sign in with your new password."); return; }
+            modal.hide();void loadAccountRequests();void refreshPendingAccountNotifications();showSystemNotification(passwordOnly?'New password saved. It is now available to view.':result.message);
+        }catch(failure){error.textContent=failure.message;error.hidden=false;}
+        finally{button.disabled=false;}
+    });
+    container.addEventListener('hide.bs.modal',()=>{form.elements.password.value='';if(form.elements.passwordConfirmation)form.elements.passwordConfirmation.value='';});
+    container.addEventListener('hidden.bs.modal',()=>{modal.dispose();container.remove();},{once:true});
+    container.addEventListener('shown.bs.modal',()=>{form.elements[passwordOnly?'password':'fullName'].focus();},{once:true});
+    modal.show();
+}
+

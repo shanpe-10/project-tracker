@@ -23,7 +23,7 @@ async function authRequest(action, payload = {}) {
     if (!response.ok && !result.message) result.message = "The login service is unavailable.";
     return result;
 }
-function applyAuthenticatedUser(user, csrfToken, sessionTiming = null) {
+function applyAuthenticatedUser(user, csrfToken, sessionTiming = null, refreshOnly = false) {
     window.currentUser = user;
     window.sessionCsrfToken = csrfToken;
     document.getElementById("currentUserName").textContent = user.fullName || user.username;
@@ -31,9 +31,9 @@ function applyAuthenticatedUser(user, csrfToken, sessionTiming = null) {
     const avatar = document.getElementById("currentUserInitial");
     if (avatar) avatar.textContent = initial || "U";
     const photo = document.getElementById("currentUserPhoto");
-    const photoUrl = user.profilePhoto;
+    const photoUrl = user.profilePhoto || `api/profile.php?action=photo&v=${Date.now()}`;
     if (avatar) {
-        avatar.style.backgroundImage = photoUrl ? `url("${photoUrl}")` : "";
+        avatar.style.backgroundImage = `url("${photoUrl}")`;
         avatar.classList.toggle("has-photo", Boolean(user.profilePhoto));
     }
     if (photo) {
@@ -48,11 +48,11 @@ function applyAuthenticatedUser(user, csrfToken, sessionTiming = null) {
     const menuRole = document.getElementById("accountMenuRole");
     if (menuRole) menuRole.textContent = ({superadmin: "Superadmin", admin: "Administrator", staff: "Staff"})[user.role] || "Account";
     document.getElementById("accountRequestsTabBtn")?.classList.toggle("d-none", !["admin", "superadmin"].includes(user.role));
+    if (!refreshOnly && typeof resetDeletionRequests === "function") resetDeletionRequests();
+    document.getElementById("deletionRequestsNav")?.classList.toggle("d-none", user.role === "superadmin");
+    if (!refreshOnly && typeof startDeletionRequestUpdates === "function" && user.role !== "superadmin") startDeletionRequestUpdates();
     const isSuperadmin = user.role === "superadmin";
-    document.getElementById('superadminGuideContent')?.classList.toggle('d-none', !isSuperadmin);
-    document.getElementById('projectUserGuideContent')?.classList.toggle('d-none', isSuperadmin);
-    const guideTitle=document.getElementById('systemGuideTitle');if(guideTitle)guideTitle.textContent=isSuperadmin?'Superadmin guide':'How to use the Project Tracker';
-    const guideLabel=document.getElementById('systemGuideNavigationLabel');if(guideLabel)guideLabel.textContent=isSuperadmin?'Superadmin guide':'How to use this tracker';
+    if (typeof window.refreshRoleGuide === 'function') window.refreshRoleGuide();
     document.body.classList.toggle("account-management-only", isSuperadmin);
     document.querySelectorAll("[data-project-navigation]").forEach(button => button.hidden = isSuperadmin);
     const eyebrow = document.getElementById("administrationPageEyebrow");
@@ -62,8 +62,10 @@ function applyAuthenticatedUser(user, csrfToken, sessionTiming = null) {
     setPermissionControlState("exportExcelButton", user.canExport, "Ask Superadmin for Export Excel permission.");
     setPermissionControlState("importExcelButton", user.canImport, "Ask Superadmin for Import Excel permission.");
     setPermissionControlState("deleteAllRecordsButton", user.canDeleteAll, "Ask Superadmin for Delete all records permission.");
-    clearInterval(window.accountNotificationTimer);
-    window.pendingAccountRequests = [];
+    const deleteAllLabel = document.getElementById("deleteAllRecordsLabel");
+    if (deleteAllLabel) deleteAllLabel.textContent = user.role === "admin" ? "Delete all records" : "Request deletion of all records";
+    if (!refreshOnly) clearInterval(window.accountNotificationTimer);
+    if (!refreshOnly) window.pendingAccountRequests = [];
     const management = document.getElementById("accountManagementCard");
     const holidayCard=document.getElementById('holidayCalendarCard');
     if (holidayCard) { holidayCard.hidden=!isSuperadmin; holidayCard.classList.toggle('d-none',!isSuperadmin); }
@@ -77,12 +79,23 @@ function applyAuthenticatedUser(user, csrfToken, sessionTiming = null) {
     if (tab) tab.textContent = user.role === "superadmin" ? "Accounts" : "Admin";
     document.body.classList.remove("authentication-required");
     document.getElementById("loginOverlay")?.classList.add("d-none");
-    if (user.role === "superadmin" && typeof refreshPendingAccountNotifications === "function") {
+    if (!refreshOnly && user.role === "superadmin" && typeof refreshPendingAccountNotifications === "function") {
         refreshPendingAccountNotifications();
         clearInterval(window.accountNotificationTimer);
         window.accountNotificationTimer = setInterval(refreshPendingAccountNotifications, 30000);
     }
-    if (typeof startTrackerSession === "function") startTrackerSession(sessionTiming);
+    if (!refreshOnly && typeof startTrackerSession === "function") startTrackerSession(sessionTiming);
+    if (refreshOnly) {
+        if (typeof renderTablePage === 'function') renderTablePage();
+        if (typeof renderProjectAttachments === 'function') renderProjectAttachments();
+        document.getElementById('projectDetailsEditButton')?.classList.toggle('d-none', !user.canEdit);
+        const save = document.getElementById('saveBtn');
+        if (save && typeof editingId !== 'undefined') {
+            const allowed = editingId === null ? user.canCreate : user.canEdit;
+            save.disabled = !allowed || (typeof projectSaveInProgress !== 'undefined' && projectSaveInProgress);
+            save.title = allowed ? '' : 'Permission changed. Your draft is kept; contact Superadmin for access.';
+        }
+    }
 }
 function showLogin(message = "") {
     if (typeof preserveSuspendedProjectDraft === "function" && preserveSuspendedProjectDraft()) message += " Your project draft is kept in this tab. Sign in with the same account to continue; do not refresh or close this tab.";
@@ -90,7 +103,9 @@ function showLogin(message = "") {
     if (typeof bootstrap !== "undefined") document.querySelectorAll(".modal.show").forEach(modal => bootstrap.Modal.getInstance(modal)?.hide());
     if (typeof resetFormAccess === "function") resetFormAccess({ silent: true, navigate: false, preserveDraft: true });
     if (typeof stopProjectEditingPresence === "function") void stopProjectEditingPresence({ clear: true });
+    if (typeof resetDeletionRequests === "function") resetDeletionRequests();
     window.currentUser = null;
+    if (typeof window.refreshRoleGuide === 'function') window.refreshRoleGuide();
     db = null; window.db = null; window.dbReady = false;
     window.pendingAccountRequests = [];
     window.projectNotificationGroups = [];

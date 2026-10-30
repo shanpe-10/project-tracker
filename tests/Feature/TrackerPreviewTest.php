@@ -7,6 +7,15 @@ use Tests\TestCase;
 
 class TrackerPreviewTest extends TestCase
 {
+    protected function setUp(): void {
+        parent::setUp();
+        if (DB::connection()->getDriverName() === 'pgsql') {
+            DB::unprepared(file_get_contents(database_path('lgu_project_tracker_schema.sql')));
+            DB::table('users')->insert(['id'=>5,'username'=>'preview_admin','full_name'=>'Preview Admin','role'=>'admin','active'=>true,'password_hash'=>'fixture']);
+            $data=['title'=>'Disposable preview record','status'=>'On-going Bidding'];
+            DB::table('projects')->insert(['data'=>json_encode($data)]+\App\Http\Controllers\TrackerDataController::projectColumns($data));
+        }
+    }
     private array $admin = [
         'id' => 5, 'username' => 'admin', 'fullName' => 'Administrator', 'role' => 'admin',
         'canCreate' => true, 'canEdit' => true, 'canImport' => true, 'canExport' => true,
@@ -33,21 +42,21 @@ class TrackerPreviewTest extends TestCase
         $session = ['tracker_user' => $this->admin, 'tracker_csrf' => 'test-token', 'tracker_created_at' => time(), 'tracker_last_activity' => time()];
         $total = DB::table('projects')->count();
         $active = DB::table('projects')->whereNull('archived_at')->count();
-        $this->withTrackerSession($session)->getJson('/api/data.php')->assertOk()->assertJsonPath('ok', true)->assertJsonCount($total, 'projects');
-        $this->withTrackerSession($session)->getJson('/api/data.php?action=listProjects&lifecycle=all&pageSize=100')->assertOk()->assertJsonPath('totalRecords', $active);
-        $this->withTrackerSession($session)->getJson('/api/data.php?action=dashboard')->assertOk()->assertJsonPath('metrics.total', $active);
+        $this->withSession($session)->getJson('/api/data.php')->assertOk()->assertJsonPath('ok', true)->assertJsonCount($total, 'projects');
+        $this->withSession($session)->getJson('/api/data.php?action=listProjects&lifecycle=all&pageSize=100')->assertOk()->assertJsonPath('totalRecords', $active);
+        $this->withSession($session)->getJson('/api/data.php?action=dashboard')->assertOk()->assertJsonPath('metrics.total', $active);
     }
 
     public function test_csv_export_and_import_rollback_on_postgresql(): void
     {
         if (config('database.default') === 'sqlite') $this->markTestSkipped('Run this integration check with the PostgreSQL test configuration.');
         $session = ['tracker_user' => $this->admin, 'tracker_csrf' => 'test-token', 'tracker_created_at' => time(), 'tracker_last_activity' => time()];
-        $this->withTrackerSession($session)->get('/api/data.php?action=listProjects&format=csv')->assertOk()->assertHeader('content-type', 'text/csv; charset=utf-8');
+        $this->withSession($session)->get('/api/data.php?action=listProjects&format=csv')->assertOk()->assertHeader('content-type', 'text/csv; charset=utf-8');
         $batch = 'codex_test_'.bin2hex(random_bytes(8));
         $before = DB::table('projects')->count();
-        $this->withTrackerSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', ['action' => 'bulkSaveProjects', 'batchId' => $batch, 'records' => [['title' => 'Rollback Integration Test', 'status' => 'Pending', 'biddingDate' => '2026-09-17']]])->assertOk()->assertJsonPath('count', 1);
-        $this->assertSame($before + 1, DB::table('projects')->count());
-        $this->withTrackerSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', ['action' => 'rollbackImport', 'batchId' => $batch])->assertOk()->assertJsonPath('count', 1);
+        $this->withSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', ['action' => 'bulkSaveProjects', 'batchId' => $batch, 'records' => [['title' => 'Rollback Integration Test', 'status' => 'Pending', 'biddingDate' => '2026-09-17']]])->assertOk()->assertJsonPath('count', 1);
+        $this->assertSame($before, DB::table('projects')->count()); // staged upload is not visible project data
+        $this->withSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', ['action' => 'rollbackImport', 'batchId' => $batch])->assertOk()->assertJsonPath('count', 0);
         $this->assertSame($before, DB::table('projects')->count());
     }
 
@@ -55,7 +64,7 @@ class TrackerPreviewTest extends TestCase
     {
         if (config('database.default') === 'sqlite') $this->markTestSkipped('Run this integration check with the PostgreSQL test configuration.');
         $session = ['tracker_user' => $this->admin, 'tracker_csrf' => 'test-token', 'tracker_created_at' => time(), 'tracker_last_activity' => time()];
-        $response = $this->withTrackerSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/backups.php', ['action' => 'runManual'])->assertOk()->assertJsonPath('ok', true);
+        $response = $this->withSession($session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/backups.php', ['action' => 'runManual'])->assertOk()->assertJsonPath('ok', true);
         $archive = (string) $response->json('archivePath');
         $this->assertFileExists($archive); $this->assertFileExists($archive.'.sha256');
         $zip = new \ZipArchive; $this->assertTrue($zip->open($archive) === true); $this->assertNotFalse($zip->locateName('database.sql')); $zip->close();

@@ -43,16 +43,16 @@ class HolidaySyncTest extends TestCase
     {
         $this->getJson('/api/holidays.php')->assertUnauthorized();
         $staff=$this->roleSession('staff');
-        $this->withTrackerSession($staff)->getJson('/api/holidays.php')->assertForbidden();
+        $this->withSession($staff)->getJson('/api/holidays.php')->assertForbidden();
         $admin=$this->roleSession('admin');
-        $this->withTrackerSession($admin)->getJson('/api/holidays.php')->assertForbidden();
-        $this->withTrackerSession($admin)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertForbidden();
+        $this->withSession($admin)->getJson('/api/holidays.php')->assertForbidden();
+        $this->withSession($admin)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertForbidden();
         $super=$this->roleSession('superadmin');
-        $this->withTrackerSession($super)->getJson('/api/holidays.php')->assertOk();
-        $this->withTrackerSession($super)->withHeader('X-CSRF-Token','wrong')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertStatus(419);
-        $this->withTrackerSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertOk()->assertJsonPath('state.enabled',false);
-        $this->withTrackerSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>true])->assertStatus(409);
-        $this->withTrackerSession($super)->getJson('/api/data.php')->assertForbidden();
+        $this->withSession($super)->getJson('/api/holidays.php')->assertOk();
+        $this->withSession($super)->withHeader('X-CSRF-Token','wrong')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertStatus(419);
+        $this->withSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertOk()->assertJsonPath('state.enabled',false);
+        $this->withSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>true])->assertStatus(409);
+        $this->withSession($super)->getJson('/api/data.php')->assertForbidden();
     }
 
     public function test_manual_overrides_survive_sync_and_restore_to_source(): void
@@ -104,12 +104,12 @@ class HolidaySyncTest extends TestCase
     public function test_superadmin_can_select_non_working_weekdays_and_holiday_exclusions(): void
     {
         $super=$this->roleSession('superadmin');
-        $this->withTrackerSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>true,'nonWorkingDays'=>[0,1],'excludeHolidays'=>false])->assertOk()->assertJsonPath('calendar.nonWorkingDays',[0,1])->assertJsonPath('calendar.excludeHolidays',false);
+        $this->withSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>true,'nonWorkingDays'=>[0,1],'excludeHolidays'=>false])->assertOk()->assertJsonPath('calendar.nonWorkingDays',[0,1])->assertJsonPath('calendar.excludeHolidays',false);
         $this->assertTrue(TrackerMilestones::isWorkday(new \DateTimeImmutable('2026-10-03')));
         $this->assertFalse(TrackerMilestones::isWorkday(new \DateTimeImmutable('2026-10-05')));
         $this->assertTrue(TrackerMilestones::isWorkday(new \DateTimeImmutable('2026-12-25')));
         $this->assertSame('2026-10-03',TrackerMilestones::addWorkdays(new \DateTimeImmutable('2026-10-02'),1)->format('Y-m-d'));
-        $this->withTrackerSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>1,'enabled'=>true,'nonWorkingDays'=>[0,1,2,3,4,5,6],'excludeHolidays'=>true])->assertUnprocessable();
+        $this->withSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>1,'enabled'=>true,'nonWorkingDays'=>[0,1,2,3,4,5,6],'excludeHolidays'=>true])->assertUnprocessable();
         $this->assertSame([0,1],TrackerHolidays::calendar()['nonWorkingDays']);
     }
 

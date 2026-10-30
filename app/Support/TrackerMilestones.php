@@ -65,7 +65,7 @@ final class TrackerMilestones
 
     public static function alerts(array $project, array $settings, \DateTimeImmutable $today): array
     {
-        if (! empty($project['archivedAt']) || ! empty($project['timelineCompletedMarked']) || in_array(strtolower(trim((string) ($project['status'] ?? ''))), ['completed','released'], true)) return [];
+        if (! empty($project['archivedAt']) || ! empty($project['timelineCompletedMarked']) || in_array(strtolower(TrackerProjectInput::automaticStatus($project,$today)), ['completed','released'], true)) return [];
         $dueDates = self::dueDates($project);
         $resolved = is_array($project['timelineAlertsCompleted'] ?? null) ? $project['timelineAlertsCompleted'] : [];
         $today = $today->format('Y-m-d');

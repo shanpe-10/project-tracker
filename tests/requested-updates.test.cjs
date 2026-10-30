@@ -17,7 +17,7 @@ ctx.loadDocuments=()=>calls.push('load');
 ctx.restoreLastWorkspace=()=>vm.runInContext('activeWorkspace="documents"',ctx);
 ctx.dbReady=true;
 async function main(){
-    assert.equal(ctx.getProjectMilestoneDates({contractRef:'2026-10-01',contractDuration:30.5,ntpDate:'2026-10-20'}).contractDueDate,'2026-10-31');
+    assert.equal(ctx.getProjectMilestoneDates({contractRef:'2026-10-01',contractDuration:30.5,ntpDate:'2026-10-20'}).contractDueDate,'2026-11-12');
     assert.equal(ctx.parseContractDuration('60 days'),null);
     assert.equal(ctx.parseContractDuration(true),null);
     assert.equal(ctx.getTimelineDays('finalInspection'),7);

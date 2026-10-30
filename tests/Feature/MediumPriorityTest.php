@@ -79,7 +79,7 @@ class MediumPriorityTest extends TestCase
         $id = $this->project($before);
         $updated = $before;
         $updated['title'] = 'Corrected title';
-        $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token', 'test-token')->post('/api/project-edit.php', [
+        $this->withSession($this->session)->withHeader('X-CSRF-Token', 'test-token')->post('/api/project-edit.php', [
             'projectId' => $id, 'record' => json_encode($updated), 'deleteIds' => '[]',
         ])->assertOk()->assertJsonPath('record.title', 'Corrected title');
         $this->assertSame('Corrected title', DB::table('projects')->where('id', $id)->value('title'));
@@ -94,7 +94,7 @@ class MediumPriorityTest extends TestCase
         $id = $this->project($before);
         $updated = $before;
         $updated['title'] = 'Should not save';
-        $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token', 'test-token')->post('/api/project-edit.php', [
+        $this->withSession($this->session)->withHeader('X-CSRF-Token', 'test-token')->post('/api/project-edit.php', [
             'projectId' => $id, 'record' => json_encode($updated), 'deleteIds' => '["missing-attachment"]',
         ])->assertStatus(422);
         $this->assertSame('Original', DB::table('projects')->where('id', $id)->value('title'));
@@ -105,7 +105,7 @@ class MediumPriorityTest extends TestCase
     {
         $id = $this->project(['projectNo' => '73', 'title' => 'Archive me', 'status' => 'Completed', 'completion' => '2025-01-01']);
         foreach ([true, false] as $archived) {
-            $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', [
+            $this->withSession($this->session)->withHeader('X-CSRF-Token', 'test-token')->postJson('/api/data.php', [
                 'action' => 'setProjectArchived', 'id' => $id, 'archived' => $archived,
             ])->assertOk();
         }

@@ -15,6 +15,8 @@ context.XLSX = {
 context.FileReader = class {
     readAsArrayBuffer() { this.onload({ target: { result: new ArrayBuffer(1) } }); }
 };
+const projectValidation = fs.readFileSync(path.join(__dirname, '../public/js/projects.js'),'utf8');
+vm.runInContext(projectValidation.slice(projectValidation.indexOf('function validateProjectNumbersAndActualDates('),projectValidation.indexOf('function saveDocument(')),context);
 vm.runInContext(fs.readFileSync(path.join(__dirname, '../public/js/excel.js'), 'utf8'), context);
 vm.runInContext('showImportPreview = (rows, isolated) => { captured = { rows, isolated }; }', context);
 

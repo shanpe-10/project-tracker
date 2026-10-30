@@ -57,7 +57,7 @@ class CloudDeploymentTest extends TestCase
 
     private function authenticated(): self
     {
-        $this->withTrackerSession($this->session);
+        $this->withSession($this->session);
         app('session')->save();
         return $this->withCredentials()->withCookie(config('session.cookie'), app('session')->getId())
             ->withHeader('X-CSRF-Token','cloud-token');
@@ -123,12 +123,13 @@ class CloudDeploymentTest extends TestCase
         putenv('TRACKER_BOOTSTRAP_NAME=Pilot Owner');
         putenv('TRACKER_BOOTSTRAP_USERNAME=pilot.owner');
         putenv('TRACKER_BOOTSTRAP_PASSWORD=test-only-pilot-password');
-        $this->assertSame(0,Artisan::call('tracker:bootstrap-pilot'));
+        $this->assertSame(0,Artisan::call('tracker:bootstrap-cloud'));
         $user = DB::table('users')->first();
         $this->assertSame('superadmin',$user->role);
         $this->assertTrue(Hash::check('test-only-pilot-password',$user->password_hash));
+        $this->assertSame('test-only-pilot-password', \Illuminate\Support\Facades\Crypt::decryptString($user->password_encrypted));
         putenv('TRACKER_BOOTSTRAP_PASSWORD=replacement-test-password');
-        $this->assertSame(0,Artisan::call('tracker:bootstrap-pilot'));
+        $this->assertSame(0,Artisan::call('tracker:bootstrap-cloud'));
         $this->assertDatabaseCount('users',1);
         $this->assertSame($user->password_hash,DB::table('users')->value('password_hash'));
         $this->assertStringNotContainsString('replacement-test-password',Artisan::output());
@@ -136,10 +137,10 @@ class CloudDeploymentTest extends TestCase
 
     public function test_bootstrap_rejects_missing_credentials_and_skips_any_existing_user(): void
     {
-        $this->assertSame(1,Artisan::call('tracker:bootstrap-pilot'));
+        $this->assertSame(1,Artisan::call('tracker:bootstrap-cloud'));
         $this->assertDatabaseCount('users',0);
         $this->fixtures();
-        $this->assertSame(0,Artisan::call('tracker:bootstrap-pilot'));
+        $this->assertSame(0,Artisan::call('tracker:bootstrap-cloud'));
         $this->assertDatabaseCount('users',3);
     }
 
@@ -174,7 +175,11 @@ class CloudDeploymentTest extends TestCase
         $archive = Storage::disk('s3')->path($key);
         $zip = new \ZipArchive;
         $this->assertTrue($zip->open($archive) === true);
-        $this->assertStringContainsString('PostgreSQL database dump',$zip->getFromName('database.sql'));
+        $dump=$zip->getFromName('database.sql');
+        $this->assertStringContainsString('PostgreSQL database dump',$dump);
+        foreach (['deletion_requests','deletion_request_targets','deletion_request_history_hidden','audit_log','import_jobs','import_job_changes','import_staging_chunks'] as $table) {
+            $this->assertStringContainsString($table,$dump);
+        }
         $this->assertNotFalse($zip->locateName('exports/all-projects.xlsx'));
         $this->assertFalse($zip->locateName('profile-photos'));
         $data = json_decode(DB::table('projects')->where('id',$id)->value('data'),true);
@@ -184,6 +189,22 @@ class CloudDeploymentTest extends TestCase
         $this->assertNull(app(\App\Http\Controllers\TrackerBackupController::class)->runScheduledBackup());
         $this->asUser(3);
         $this->authenticated()->getJson('/api/backups.php?action=downloadLatest')->assertForbidden();
+    }
+
+
+    public function test_confirmed_project_deletion_removes_only_its_private_attachments(): void
+    {
+        $this->fixtures();
+        $id=$this->project();
+        $attachment=$this->edit($id)->assertOk()->json('record.attachments.0');
+        $key='attachments/'.$id.'/'.$attachment['storedName'];
+        Storage::disk('s3')->put('attachments/999/untouched.txt','Other project');
+        $this->authenticated();
+        $this->confirmDirectFixture(['targetType'=>'project','id'=>$id])->assertOk();
+        $this->assertDatabaseMissing('projects',['id'=>$id]);
+        Storage::disk('s3')->assertMissing($key);
+        Storage::disk('s3')->assertExists('attachments/999/untouched.txt');
+        $this->assertSame(1,DB::table('audit_log')->where('action','project.deleted')->count());
     }
 
     public function test_cloud_media_rejects_path_traversal(): void

@@ -36,163 +36,16 @@ function exportToExcel() {
  * The user may export an Excel backup first.
  */
 function promptClearDatabaseSystem() {
-
     if (window.currentUser?.canDeleteAll !== true) {
-        showSystemNotification("You do not have permission to delete all records.");
+        showSystemNotification("You do not have permission to request deletion of all records.");
         return;
     }
-
-    if (
-        !confirm(
-            "WARNING: You are initiating a full database purge. This will wipe ALL project records and history channels forever. Proceed?"
-        )
-    ) {
-        return;
-    }
-
-
-    const wantExport =
-        confirm(
-            "Backup Prompt:\n\n" +
-            "Would you like to EXPORT and download your current data as an Excel file before wiping the system?\n\n" +
-            "• Click OK (Yes) to download a backup copy and then purge.\n" +
-            "• Click Cancel (No) to immediately wipe everything without saving."
-        );
-
-
-    if (wantExport) {
-
-        try {
-
-            exportToExcel();
-
-
-            showSystemNotification(
-                "Backup report generated and downloaded successfully."
-            );
-
-        } catch (exportError) {
-
-            console.error(
-                "Export failed during purge process:",
-                exportError
-            );
-
-
-            const forceWipe =
-                confirm(
-                    "The Excel export failed or was interrupted. Do you still want to proceed with completely wiping the data without a backup?"
-                );
-
-
-            if (!forceWipe) {
-                return;
-            }
-        }
-    }
-
-
-    const confirmationPhrase = prompt(
-        "Final confirmation required. Type DELETE ALL to permanently remove every project and history record."
-    );
-
-    if (confirmationPhrase === "DELETE ALL") {
-        executeClearDatabaseWithLoadingOverlay();
-    } else if (confirmationPhrase !== null) {
-        showSystemNotification("Database purge cancelled: confirmation phrase did not match.");
-    }
+    openDeletionRequest({ targetType: "project", all: true });
 }
 
-
-/**
- * Clears the projects and history IndexedDB stores.
- */
+// Retain compatibility with existing callers; this opens a request, never a purge.
 function executeClearDatabaseWithLoadingOverlay() {
-
-    const loader =
-        document.getElementById(
-            "loadingOverlay"
-        );
-
-
-    if (loader) {
-        loader.classList.add(
-            "active"
-        );
-    }
-
-
-    setTimeout(() => {
-
-        const transaction =
-            db.transaction(
-                [
-                    "projects",
-                    "history"
-                ],
-                "readwrite"
-            );
-
-
-        const projectStore =
-            transaction.objectStore(
-                "projects"
-            );
-
-
-        // Clearing projects also clears their history on the server.
-        projectStore.clear();
-
-        transaction.oncomplete = () => {
-
-            setTimeout(() => {
-
-                if (loader) {
-                    loader.classList.remove(
-                        "active"
-                    );
-                }
-
-
-                alert(
-                    "All records and history channels have been wiped completely."
-                );
-
-
-                editingId = null;
-
-                currentPage = 1;
-
-
-                resetFormAccess();
-
-                loadDocuments();
-
-            }, 600);
-        };
-
-
-        transaction.onerror = event => {
-
-            if (loader) {
-                loader.classList.remove(
-                    "active"
-                );
-            }
-
-
-            console.error(
-                "Database purge failed:",
-                event.target.error
-            );
-
-
-            alert(
-                "The database could not be cleared."
-            );
-        };
-
-    }, 200);
+    promptClearDatabaseSystem();
 }
 
 
@@ -247,8 +100,7 @@ const importPreviewAliases = {
     swa: ["SWA", "22. SWA"], ldAmount: ["LD Amount", "23. LD Amount"],
     ldNewCompletionDate: ["Extended Completion Date", "23. New Extended Completion Date"],
     completion: ["Completion Date", "24. Completion Date"],
-    status: ["Operational Status", "25. Operational Status"],
-    manualStatus: ["Manual Operational Status"]
+    status: ["Operational Status", "25. Operational Status"]
 };
 
 function importPreviewValue(row, field) {
@@ -281,6 +133,38 @@ function importPreviewMatch(row) {
     };
 }
 
+function parseImportDate(value) {
+
+                    if (!value || ["-", "n/a", "na"].includes(String(value).trim().toLowerCase())) {
+                        return "";
+                    }
+
+
+                    if (typeof value === "number") {
+                        const parts = XLSX.SSF.parse_date_code(value);
+                        return parts
+                            ? `${String(parts.y).padStart(4, "0")}-${String(parts.m).padStart(2, "0")}-${String(parts.d).padStart(2, "0")}`
+                            : String(value);
+                    }
+
+                    const rawValue = String(value).trim();
+                    if (/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) return rawValue;
+
+                    const date =
+                        new Date(
+                            value
+                        );
+
+
+                    return !isNaN(
+                        date.getTime()
+                    )
+                        ? date
+                            .toISOString()
+                            .split("T")[0]
+                        : String(value);
+                }
+
 function importPreviewErrors(row, rowNumber) {
     const errors = [];
     const title = String(importPreviewValue(row, "title")).trim();
@@ -304,7 +188,10 @@ function importPreviewErrors(row, rowNumber) {
         const value = raw.replace(/[₱,$\s]/g, "");
         if (!/^\d+(\.\d{1,2})?$/.test(value)) errors.push(`${field}: invalid amount`);
     }
-    return errors;
+    const numbers = Object.fromEntries(['approvedBudget','bidAmount','ldAmount','ldNoOfDays','ldActualDuration','contractDuration'].map(field=>[field,importPreviewValue(row,field)]));
+    for (const field of ['completion','swa']) numbers[field] = parseImportDate(importPreviewValue(row,field));
+    errors.push(...validateProjectNumbersAndActualDates(numbers));
+    return [...new Set(errors)];
 }
 
 function renderImportPreview() {
@@ -380,7 +267,7 @@ function renderImportPreview() {
     table.dataset.columns = JSON.stringify(columns);
     summary.innerHTML = `<strong>${importPreviewRows.length}</strong> rows <span class="import-preview-summary-divider">•</span> <strong>${importPreviewRows.length - invalid}</strong> ready <span class="import-preview-summary-divider">•</span> <strong>${duplicates}</strong> existing matches <span class="import-preview-summary-divider">•</span> <strong>${invalid}</strong> invalid`;
     if (scroller) { scroller.scrollLeft = scrollLeft; scroller.scrollTop = scrollTop; }
-    document.getElementById("continueImportPreviewButton").disabled = !importPreviewRows.length || invalid === importPreviewRows.length;
+    document.getElementById("continueImportPreviewButton").disabled = !importPreviewRows.length || invalid > 0;
 }
 
 async function showImportPreview(rows, isLdSheet) {
@@ -417,6 +304,9 @@ function cancelImportPreview() {
 function continueImportPreview() {
     const rows = importPreviewRows;
     if (!rows.length) return;
+    if (rows.some((row,index)=>importPreviewErrors(row,index+2).length)) {
+        showSystemNotification('Correct all invalid rows before importing. No projects were saved.'); return;
+    }
     const choices = Object.fromEntries([...importPreviewChoices].map(([index, choice]) => [
         index, { ...choice, assignedProjectNo: importPreviewAssignedNumbers.get(index) || "" }
     ]));
@@ -615,7 +505,6 @@ function handleExcelImport(event) {
                 "Extended Completion Date": "ldNewCompletionDate",
                 "Actual Construction Duration": "ldActualDuration",
                 "Completion Date": "completion", "Operational Status": "status",
-                "Manual Operational Status": "manualStatus",
                 "Additional Remarks": "remarks"
             };
             const isServerExport = rawRows[0]["Project No."] !== undefined &&
@@ -624,7 +513,7 @@ function handleExcelImport(event) {
             const importRows = isServerExport ? rawRows.map(row => {
                 const mapped = { "Project No.": row["Project No."] };
                 Object.entries(exportedColumns).forEach(([heading, field]) => {
-                    if (["materialTestingDate", "noaDueDate", "manualStatus"].includes(field) && !Object.hasOwn(row, heading)) return;
+                    if (["materialTestingDate", "noaDueDate"].includes(field) && !Object.hasOwn(row, heading)) return;
                     mapped[field] = row[heading] ?? "";
                 });
                 return mapped;
@@ -701,7 +590,6 @@ const importMoneyFields = ["approvedBudget", "bidAmount", "ldAmount"];
 
 function validateImportedProject(payload, rowNumber) {
     const errors = [];
-    if (payload.manualStatus && !["Pending", "On-going Bidding", "Pre-inspection", "Final-inspection", "Completed", "Released"].includes(payload.manualStatus)) errors.push("Choose a valid manual operational status");
     if (!String(payload.title || "").trim() || payload.title === "Imported Unnamed Project") errors.push("Project title is required");
     importDateFields.forEach(field => {
         const value = String(payload[field] || "").trim();
@@ -719,6 +607,7 @@ function validateImportedProject(payload, rowNumber) {
         const value = raw.replace(/[₱,$\s]/g, "");
         if (!/^\d+(\.\d{1,2})?$/.test(value) || Number(value) < 0) errors.push(`${field}: invalid monetary value`);
     });
+    errors.push(...validateProjectNumbersAndActualDates(payload));
     return errors.map(message => ({ row: rowNumber, projectNo: payload.projectNo || "", title: payload.title || "", message }));
 }
 
@@ -795,38 +684,7 @@ getAllRequest.onsuccess =
              * Converts imported spreadsheet date values
              * into YYYY-MM-DD when possible.
              */
-                const parseImportDate =
-                value => {
 
-                    if (!value || ["-", "n/a", "na"].includes(String(value).trim().toLowerCase())) {
-                        return "";
-                    }
-
-
-                    if (typeof value === "number") {
-                        const parts = XLSX.SSF.parse_date_code(value);
-                        return parts
-                            ? `${String(parts.y).padStart(4, "0")}-${String(parts.m).padStart(2, "0")}-${String(parts.d).padStart(2, "0")}`
-                            : String(value);
-                    }
-
-                    const rawValue = String(value).trim();
-                    if (/^\d{4}-\d{2}-\d{2}$/.test(rawValue)) return rawValue;
-
-                    const date =
-                        new Date(
-                            value
-                        );
-
-
-                    return !isNaN(
-                        date.getTime()
-                    )
-                        ? date
-                            .toISOString()
-                            .split("T")[0]
-                        : String(value);
-                };
 
 
             rows.forEach(
@@ -1201,9 +1059,6 @@ getAllRequest.onsuccess =
                         new Date()
                             .toISOString();
 
-                    if (["manualStatus", "Manual Operational Status"].some(key => Object.hasOwn(row, key))) {
-                        payload.manualStatus = String(importPreviewValue(row, "manualStatus")).trim() || null;
-                    }
                     const rowErrors = validateImportedProject(payload, index + 2);
                     const normalizedTitle = String(payload.title || "").trim().toLowerCase().replace(/\s+/g, " ");
                     const normalizedProjectNo = String(payload.projectNo || "").trim().toLowerCase();
@@ -1426,7 +1281,7 @@ function launchConflictResolutionModal() {
         html;
 
     const summary = document.getElementById("importConflictSummary");
-    if (summary) summary.textContent = `${bulkImportConflictsQueue.length} project title or number match${bulkImportConflictsQueue.length === 1 ? "" : "es"} found. New projects receive a fresh number when needed. ${bulkImportErrors.length} invalid row${bulkImportErrors.length === 1 ? "" : "s"} will be skipped.`;
+    if (summary) summary.textContent = `${bulkImportConflictsQueue.length} project title or number match${bulkImportConflictsQueue.length === 1 ? "" : "es"} found. New projects receive a fresh number when needed. ${bulkImportErrors.length} invalid row${bulkImportErrors.length === 1 ? "" : "s"} must be corrected before importing.`;
 
 
     const modalNode =
@@ -1646,6 +1501,14 @@ function executeBulkImportProcessing(usePreviewActions = false) {
 
 
 async function executeFinalDatabaseWriteTransaction() {
+    activeImportBatchId = "";
+    if (bulkImportErrors.length) {
+        window.importInProgress = false;
+        document.getElementById('loadingOverlay')?.classList.remove('active');
+        showImportProgress(0, pendingImportPayloads.length, bulkImportErrors.length, 'Correct all invalid rows before importing. No projects were saved.', true);
+        showSystemNotification('The file contains invalid rows. Correct them in the preview or spreadsheet and try again. No projects were saved.');
+        return;
+    }
 
     if (
         pendingImportPayloads.length ===
@@ -1683,9 +1546,9 @@ async function executeFinalDatabaseWriteTransaction() {
         let imported = 0;
         for (let offset = 0; offset < pendingImportPayloads.length; offset += batchSize) {
             const records = pendingImportPayloads.slice(offset, offset + batchSize);
-            const result = await apiClient.post("bulkSaveProjects", { records, batchId: activeImportBatchId, archive: importIntoArchive });
+            const result = await apiClient.post("bulkSaveProjects", { records, batchId: activeImportBatchId, archive: importIntoArchive, chunkIndex: offset / batchSize, expectedRows: importCount });
             imported += result.count || records.length;
-            showImportProgress(imported, importCount, bulkImportErrors.length, `Importing batch ${Math.floor(offset / batchSize) + 1} of ${Math.ceil(importCount / batchSize)}…`);
+            showImportProgress(imported, importCount, bulkImportErrors.length, `Validating batch ${Math.floor(offset / batchSize) + 1} of ${Math.ceil(importCount / batchSize)}…`);
             await new Promise(resolve => setTimeout(resolve, 0));
         }
         await apiClient.post("completeImport", { batchId: activeImportBatchId });

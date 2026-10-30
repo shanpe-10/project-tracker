@@ -22,6 +22,6 @@ completion.setFullYear(completion.getFullYear() - 1);
 completion.setDate(completion.getDate() + 2);
 const dateString = `${completion.getFullYear()}-${String(completion.getMonth() + 1).padStart(2, '0')}-${String(completion.getDate()).padStart(2, '0')}`;
 assert.equal(context.checkFifteenDayWindowAlert(dateString, 'Completed'), true);
-assert.equal(context.checkFifteenDayWindowAlert(dateString, 'Pending'), false);
+assert.equal(context.checkFifteenDayWindowAlert(dateString, 'Pending'), true);
 
 console.log('Medium-priority timeline regressions passed.');

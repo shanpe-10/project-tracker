@@ -38,6 +38,7 @@ class TrackerDataController extends Controller
             'alertPage'=>['sometimes','integer','min:1'], 'alertPageSize'=>['sometimes','integer','min:1'],
             'alertSearch'=>['sometimes','nullable','string','max:2000'],
         ]);
+        \App\Support\TrackerProjectStatus::refresh();
         $action = (string) $request->query('action', '');
 
         $response = match ($action) {
@@ -57,6 +58,7 @@ class TrackerDataController extends Controller
     private function projectVersion(): string
     {
         return hash('sha256', json_encode([
+            now('Asia/Manila')->format('Y-m-d'),
             DB::table('audit_log')->whereIn('entity_type', ['project', 'projects', 'import_job'])->max('id'),
             DB::table('projects')->count(),
             \App\Support\TrackerHolidays::state()['revision'],
@@ -196,7 +198,7 @@ class TrackerDataController extends Controller
                 return response()->json(['ok' => false, 'message' => 'You do not have permission to export projects.'], 403);
             }
             $rows = $query->orderByRaw($order)->pluck('data');
-            $columns = ['projectNo' => 'Project No.', 'biddingDate' => 'Date of Bidding', 'title' => 'Project Title', 'approvedBudget' => 'ABC', 'bidAmount' => 'Bid Amount', 'winningBidder' => 'Winning Bidder', 'sourceOfFund' => 'Source of Fund', 'prNumber' => 'PR Number', 'prDate' => 'PR Date', 'obre' => 'OBRE', 'resolutionNumber' => 'Resolution Number', 'resolutionDate' => 'Resolution Date', 'noticePostQual' => 'Notice of Post Qualification', 'noa' => 'Notice of Award', 'performanceBond' => 'Performance Bond', 'contractRef' => 'Contract Date', 'contractDuration' => 'Contract Duration', 'ntpDate' => 'Notice to Proceed', 'dole' => 'DOLE Clearance', 'contractEndDate' => 'Contract End Date', 'preInspection' => 'Pre Inspection', 'finalInspection' => 'Final Inspection', 'swa' => 'SWA', 'ldAmount' => 'LD Amount', 'ldNoOfDays' => 'LD Days', 'ldNewCompletionDate' => 'Extended Completion Date', 'ldActualDuration' => 'Actual Construction Duration', 'completion' => 'Completion Date', 'status' => 'Operational Status', 'manualStatus' => 'Manual Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date'];
+            $columns = ['projectNo' => 'Project No.', 'biddingDate' => 'Date of Bidding', 'title' => 'Project Title', 'approvedBudget' => 'ABC', 'bidAmount' => 'Bid Amount', 'winningBidder' => 'Winning Bidder', 'sourceOfFund' => 'Source of Fund', 'prNumber' => 'PR Number', 'prDate' => 'PR Date', 'obre' => 'OBRE', 'resolutionNumber' => 'Resolution Number', 'resolutionDate' => 'Resolution Date', 'noticePostQual' => 'Notice of Post Qualification', 'noa' => 'Notice of Award', 'performanceBond' => 'Performance Bond', 'contractRef' => 'Contract Date', 'contractDuration' => 'Contract Duration', 'ntpDate' => 'Notice to Proceed', 'dole' => 'DOLE Clearance', 'contractEndDate' => 'Contract End Date', 'preInspection' => 'Pre Inspection', 'finalInspection' => 'Final Inspection', 'swa' => 'SWA', 'ldAmount' => 'LD Amount', 'ldNoOfDays' => 'LD Days', 'ldNewCompletionDate' => 'Extended Completion Date', 'ldActualDuration' => 'Actual Construction Duration', 'completion' => 'Completion Date', 'status' => 'Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date'];
 
             if ($request->query('format') === 'xlsx') {
                 $records = $rows->map(fn ($json) => json_decode($json, true) ?: []);
@@ -418,6 +420,7 @@ class TrackerDataController extends Controller
         if (! $project && empty($user['canEdit']) && empty($user['canResolveAlerts'])) {
             return response()->json(['ok' => false, 'message' => 'You do not have permission to add project history.'], 403);
         }
+        if (!$project && $id) return response()->json(['ok'=>false,'message'=>'Project Logs are permanent. Add a new correction entry instead.'],422);
         if ($project) \App\Support\TrackerProjectInput::validate($record);
         else {
             $request->validate([
@@ -446,11 +449,14 @@ class TrackerDataController extends Controller
                 return response()->json(['ok' => false, 'message' => 'Approved Budget is required and must be a non-negative amount with at most two decimal places.'], 422);
             }
         }
-        if ($project) {
-            $previous = $id ? json_decode((string) DB::table('projects')->where('id', $id)->value('data'), true) : [];
-            // Clients that do not include the new field must retain an existing override.
-            if (!array_key_exists('manualStatus', $record) && is_array($previous) && array_key_exists('manualStatus', $previous)) {
-                $record['manualStatus'] = $previous['manualStatus'];
+        if ($project && strtolower(trim((string) ($record['status'] ?? ''))) === 'completed' && ! self::validProjectDate($record['completion'] ?? null)) {
+            $previous = $id ? json_decode((string) DB::table('projects')->where('id', $id)->value('data'), true) : null;
+            $legacyUndated = is_array($previous)
+                && strtolower(trim((string) ($previous['status'] ?? ''))) === 'completed'
+                && trim((string) ($previous['completion'] ?? '')) === ''
+                && trim((string) ($record['completion'] ?? '')) === '';
+            if (! $legacyUndated) {
+                return response()->json(['ok' => false, 'message' => 'Completed projects require a valid Completion Date.'], 422);
             }
         }
         if ($project && $id && empty($user['canEdit'])) {
@@ -468,14 +474,6 @@ class TrackerDataController extends Controller
             \App\Support\TrackerProjectInput::validateDates($record, is_array($previous) ? $previous : []);
             \App\Support\TrackerProjectInput::validateManualResolution($record, is_array($previous) ? $previous : []);
             if (!$id) unset($record['attachments'], $record['archivedAt'], $record['archivedBy']);
-            $record = \App\Support\TrackerProjectInput::normalize($record);
-            if (strtolower(trim((string) ($record['status'] ?? ''))) === 'completed' && ! self::validProjectDate($record['completion'] ?? null)) {
-                $legacyUndated = is_array($previous)
-                    && strtolower(trim((string) ($previous['status'] ?? ''))) === 'completed'
-                    && trim((string) ($previous['completion'] ?? '')) === ''
-                    && trim((string) ($record['completion'] ?? '')) === '';
-                if (!$legacyUndated) return response()->json(['ok' => false, 'message' => 'Completed projects require a valid Completion Date.'], 422);
-            }
         }
         $clientUpdatedAt = (string) ($record['updatedAt'] ?? '');
         unset($record['id']);
@@ -485,6 +483,7 @@ class TrackerDataController extends Controller
         $record['updatedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
         $json = json_encode($record, JSON_UNESCAPED_UNICODE);
         if ($project) {
+            $record = \App\Support\TrackerProjectInput::normalize($record);
             $json = json_encode($record, JSON_UNESCAPED_UNICODE);
             $columns = $this->projectColumns($record);
             if ($id) {
@@ -532,6 +531,9 @@ class TrackerDataController extends Controller
                 $id = DB::table('history')->insertGetId($values);
             }
         }
+        if ($project && $request->input('action') !== 'saveTimelineRecord') {
+            TrackerHistory::append($id, $before ?? [], $record, $user, isset($before) ? 'Edited' : 'Created');
+        }
         $this->audit($user, $project ? 'project.saved' : 'history.saved', $project ? 'project' : 'history', $id, $project ? 'Saved project: '.($record['title'] ?? '') : 'Saved project history entry.');
         $record['id'] = $id;
 
@@ -571,25 +573,7 @@ class TrackerDataController extends Controller
 
     private function deleteRecord(Request $request, string $action): JsonResponse
     {
-        $user = $this->user($request);
-        if (empty($user['canDelete'])) {
-            return response()->json(['ok' => false, 'message' => 'You do not have permission to delete records.'], 403);
-        }
-        $id = (int) $request->input('id');
-        $project = $action === 'deleteProject';
-        $request->validate(['id'=>['required','integer','min:1']]);
-        $deleted = DB::transaction(function () use ($id, $project, $user) {
-            // Lock and read the latest attachment metadata before deleting the row.
-            $row=DB::table($project ? 'projects' : 'history')->where('id',$id)->lockForUpdate()->first();
-            DB::table($project ? 'projects' : 'history')->where('id', $id)->delete();
-            if ($project) DB::table('history')->where('project_id', $id)->delete();
-            $this->audit($user, $project ? 'project.deleted' : 'history.deleted', $project ? 'project' : 'history', $id, 'Deleted record.');
-            return $row?->data;
-        });
-        if ($project) {
-            $this->removeAttachmentDirectory($id, json_decode((string) $deleted, true) ?: []);
-        }
-        return response()->json(['ok' => true]);
+        return app(TrackerDeletionController::class)->requestFor($request, $action === 'deleteProject' ? 'project' : 'history');
     }
 
     private function setArchived(Request $request): JsonResponse
@@ -659,54 +643,73 @@ class TrackerDataController extends Controller
 
     private function clearStore(Request $request): JsonResponse
     {
-        $user = $this->user($request);
-        $store = (string) $request->input('store');
-        if (! in_array($store, ['projects', 'history'], true)) {
-            return response()->json(['ok' => false, 'message' => 'Invalid store.'], 422);
-        }
-        if (empty($user['canDeleteAll'])) {
-            return response()->json(['ok' => false, 'message' => 'You do not have permission to delete all records.'], 403);
-        }
-        $projects = DB::transaction(function () use ($store,$user) {
-            $projects=collect();
-            if ($store === 'projects') {
-                DB::table('project_number_sequences')->where('sequence_name','projects')->lockForUpdate()->first();
-                $projects=DB::table('projects')->select('id','data')->lockForUpdate()->get();
-                DB::table('projects')->delete();
-                DB::table('history')->delete();
-                DB::table('project_number_sequences')->where('sequence_name', 'projects')->update(['next_number' => 1]);
-            } else {
-                DB::table('history')->delete();
-            }
-            $this->audit($user, 'database.cleared', $store, null, $store === 'projects' ? 'Cleared all projects and project history.' : 'Cleared all project history.');
-            return $projects;
-        });
-        foreach ($projects as $project) {
-            $this->removeAttachmentDirectory((int) $project->id, json_decode($project->data, true) ?: []);
-        }
-        return response()->json(['ok' => true]);
+        $request->validate(['store' => 'required|in:projects,history']);
+        return app(TrackerDeletionController::class)->requestFor($request, $request->input('store') === 'projects' ? 'project' : 'history', true);
     }
 
-    private function removeAttachmentDirectory(int $projectId, array $project): void
+    public static function removeAttachmentDirectory(int $projectId, array $project): void
     {
+        if (\App\Support\TrackerMediaStore::cloud()) {
+            foreach ($project['attachments'] ?? [] as $attachment) {
+                $name=basename((string)($attachment['storedName'] ?? ''));
+                if ($name) { try { \App\Support\TrackerMediaStore::delete('attachments',$projectId.'/'.$name); } catch (\Throwable $error) { report($error); } }
+            }
+            return;
+        }
         $directory = rtrim((string) config('tracker.attachments'), '\\/').DIRECTORY_SEPARATOR.$projectId;
         foreach ($project['attachments'] ?? [] as $attachment) {
             $name = basename((string) ($attachment['storedName'] ?? ''));
-            if ($name) { try { \App\Support\TrackerMediaStore::delete('attachments', $projectId.'/'.$name); } catch (\Throwable $error) { report($error); } }
+            if ($name && is_file($directory.DIRECTORY_SEPARATOR.$name)) {
+                @unlink($directory.DIRECTORY_SEPARATOR.$name);
+            }
         }
-        if (! \App\Support\TrackerMediaStore::cloud() && is_dir($directory)) {
+        if (is_dir($directory)) {
             @rmdir($directory);
         }
     }
 
+    /** Stage an upload; no project/history/numbering writes until completeImport. */
     private function bulkSave(Request $request): JsonResponse
+    {
+        $user = $this->user($request);
+        if (empty($user['canImport'])) return response()->json(['ok'=>false,'message'=>'Import permission is required.'],403);
+        $request->validate(['batchId'=>'required|string|regex:/^[A-Za-z0-9_-]{12,64}$/D','records'=>'required|array|min:1|max:5000', 'chunkIndex'=>'sometimes|integer|min:0', 'expectedRows'=>'sometimes|integer|min:1']);
+        $batch = (string)$request->input('batchId');
+        $records = $request->input('records');
+        foreach ($records as $record) {
+            if (!is_array($record) || trim((string)($record['title'] ?? '')) === '') {
+                throw \Illuminate\Validation\ValidationException::withMessages(['records'=>'Every imported row requires a project title.']);
+            }
+            \App\Support\TrackerProjectInput::validate($record);
+            \App\Support\TrackerProjectInput::validateDates($record, !empty($record['id']) ? (json_decode((string)DB::table('projects')->where('id',$record['id'])->value('data'),true) ?: []) : []);
+        }
+        return DB::transaction(function () use ($request,$user,$batch,$records) {
+            DB::table('project_number_sequences')->where('sequence_name','projects')->lockForUpdate()->first();
+            $job = DB::table('import_jobs')->where('batch_id',$batch)->lockForUpdate()->first();
+            if ($job && ((int)$job->actor_id !== (int)$user['id'] || $job->status !== 'running' || $job->rolled_back_at)) {
+                return response()->json(['ok'=>false,'message'=>'This import batch is unavailable. Start a new import.'],409);
+            }
+            if (!$job) DB::table('import_jobs')->insert(['batch_id'=>$batch,'actor_id'=>$user['id'],'status'=>'running']);
+            $index = $request->input('chunkIndex');
+            if ($index === null) $index = (int)(DB::table('import_staging_chunks')->where('batch_id',$batch)->max('chunk_index') ?? -1) + 1;
+            $values = ['records'=>json_encode($records,JSON_UNESCAPED_UNICODE), 'archive'=>$request->boolean('archive'), 'expected_rows'=>$request->input('expectedRows')];
+            $old = DB::table('import_staging_chunks')->where('batch_id',$batch)->where('chunk_index',$index)->first();
+            if ($old && (json_decode($old->records,true) != $records || (bool)$old->archive !== $values['archive'] || $old->expected_rows != $values['expected_rows'])) {
+                return response()->json(['ok'=>false,'message'=>'This upload chunk changed. Start a new import.'],409);
+            }
+            if (!$old) DB::table('import_staging_chunks')->insert(['batch_id'=>$batch,'chunk_index'=>$index]+$values);
+            return response()->json(['ok'=>true,'count'=>count($records),'batchId'=>$batch,'staged'=>true]);
+        });
+    }
+
+    private function applyImport(Request $request): JsonResponse
     {
         $user = $this->user($request);
         if (empty($user['canImport'])) {
             return response()->json(['ok' => false, 'message' => 'You do not have permission to import projects.'], 403);
         }
         $records = $request->input('records');
-        if (! is_array($records) || ! $records || count($records) > 5000) {
+        if (! is_array($records) || ! $records) {
             return response()->json(['ok' => false, 'message' => 'Supply between 1 and 5,000 project rows.'], 422);
         }
         $archiveImport = $request->boolean('archive');
@@ -746,6 +749,7 @@ class TrackerDataController extends Controller
                         throw new \DomainException("Project ID $id no longer exists.");
                     }
                     $previous = $existing?->data;
+                    $original = [];
                     if ($existing) {
                         // Spreadsheet rows contain only exported fields. Retain attachments and
                         // other project metadata, as well as the existing archive state.
@@ -765,6 +769,7 @@ class TrackerDataController extends Controller
                         $record['archivedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
                         $record['archivedBy'] = $user['username'];
                     }
+                    \App\Support\TrackerProjectInput::validateDates($record, isset($original) ? $original : []);
                     $record = \App\Support\TrackerProjectInput::normalize($record);
                     $record['updatedBy'] = $user['username'];
                     $record['updatedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
@@ -778,6 +783,7 @@ class TrackerDataController extends Controller
                         $id = DB::table('projects')->insertGetId($values);
                         DB::table('import_job_changes')->insert(['batch_id' => $batch, 'project_id' => $id, 'change_type' => 'created', 'applied_data' => $json]);
                     }
+                    TrackerHistory::append($id, $original, $record, $user, $existing ? 'Imported update' : 'Imported');
                     $count++;
                 }
                 DB::table('import_jobs')->where('batch_id', $batch)->increment('processed_count', $count);
@@ -801,12 +807,33 @@ class TrackerDataController extends Controller
         if (! preg_match('/^[A-Za-z0-9_-]{12,64}$/', $batch)) {
             return response()->json(['ok' => false, 'message' => 'Invalid import batch id.'], 422);
         }
-        $updated = DB::table('import_jobs')->where('batch_id', $batch)->where('actor_id', $user['id'])->where('status', 'running')->whereNull('rolled_back_at')->update(['status' => 'completed', 'completed_at' => now()]);
-        if (! $updated) {
-            return response()->json(['ok' => false, 'message' => 'This import batch cannot be completed.'], 409);
+        try {
+            return DB::transaction(function () use ($batch,$user,$request) {
+                DB::table('project_number_sequences')->where('sequence_name','projects')->lockForUpdate()->first();
+                $job = DB::table('import_jobs')->where('batch_id',$batch)->where('actor_id',$user['id'])->lockForUpdate()->first();
+                if ($job && $job->status === 'completed' && !$job->rolled_back_at) return response()->json(['ok'=>true,'count'=>(int)$job->processed_count]);
+                if (!$job || $job->status !== 'running' || $job->rolled_back_at) throw new \DomainException('This import batch cannot be completed.');
+                $chunks = DB::table('import_staging_chunks')->where('batch_id',$batch)->orderBy('chunk_index')->get();
+                if ($chunks->isEmpty()) throw new \DomainException('No staged rows were uploaded. Start a new import.');
+                $records = []; $archive = (bool)$chunks[0]->archive; $expected = $chunks[0]->expected_rows;
+                foreach ($chunks as $index=>$chunk) {
+                    if ((int)$chunk->chunk_index !== $index || (bool)$chunk->archive !== $archive || $chunk->expected_rows != $expected) throw new \DomainException('The upload is incomplete or inconsistent. Start a new import.');
+                    array_push($records, ...json_decode($chunk->records,true));
+                }
+                if ($expected !== null && count($records) !== (int)$expected) throw new \DomainException('The upload is incomplete. No projects were saved.');
+                $ids = array_filter(array_column($records,'id'));
+                if (count($ids) !== count(array_unique($ids))) throw new \DomainException('A project appears more than once in the import. Review duplicate rows.');
+                $commit = clone $request;
+                $commit->merge(['records'=>$records,'archive'=>$archive]);
+                $response = $this->applyImport($commit);
+                if ($response->getStatusCode() !== 200) throw new \DomainException($response->getData()->message ?? 'Import failed.');
+                DB::table('import_jobs')->where('batch_id',$batch)->update(['status'=>'completed','completed_at'=>now()]);
+                DB::table('import_staging_chunks')->where('batch_id',$batch)->delete();
+                return $response;
+            });
+        } catch (\DomainException $error) {
+            return response()->json(['ok'=>false,'message'=>$error->getMessage()],422);
         }
-
-        return response()->json(['ok' => true]);
     }
 
     private function rollbackImport(Request $request): JsonResponse
@@ -827,7 +854,13 @@ class TrackerDataController extends Controller
                     throw new \DomainException('Import job not found.');
                 } if ($job->rolled_back_at) {
                     throw new \DomainException('This import was already rolled back.');
-                } $count = 0;
+                }
+                DB::table('import_staging_chunks')->where('batch_id',$batch)->delete();
+                // Import rollback must not provide another route to delete saved projects.
+                if (DB::table('import_job_changes')->where('batch_id', $batch)->where('change_type', 'created')->exists()) {
+                    throw new \DomainException('This rollback would delete saved projects. Submit deletion requests for the imported projects so an administrator can review and confirm them.');
+                }
+                $count = 0;
                 foreach (DB::table('import_job_changes')->where('batch_id', $batch)->orderByDesc('id')->get() as $change) {
                     $current = DB::table('projects')->where('id',$change->project_id)->lockForUpdate()->first();
                     if (!$change->applied_data || !$current || json_decode($current->data,true) != json_decode($change->applied_data,true)) {
@@ -838,7 +871,10 @@ class TrackerDataController extends Controller
                         DB::table('projects')->where('id', $change->project_id)->delete();
                     } else {
                         $record = json_decode((string) $change->previous_data, true) ?: [];
-                        DB::table('projects')->where('id', $change->project_id)->update(['data' => $change->previous_data] + $this->projectColumns($record) + ['archived_at' => ! empty($record['archivedAt']) ? date('Y-m-d H:i:s', strtotime($record['archivedAt'])) : null, 'updated_by' => $user['id'], 'updated_at' => now()]);
+                        $record['updatedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
+                        $record['updatedBy'] = $user['username'];
+                        TrackerHistory::append((int)$change->project_id, json_decode($current->data,true), $record, $user, 'Import rollback');
+                        DB::table('projects')->where('id', $change->project_id)->update(['data' => json_encode($record,JSON_UNESCAPED_UNICODE)] + $this->projectColumns($record) + ['archived_at' => ! empty($record['archivedAt']) ? date('Y-m-d H:i:s', strtotime($record['archivedAt'])) : null, 'updated_by' => $user['id'], 'updated_at' => now()]);
                     }
                     $count++;
                 }
@@ -917,6 +953,11 @@ class TrackerDataController extends Controller
 
     private function projectAlerts(array $project, array $settings, \DateTimeImmutable $today): array
     {
+        foreach (['completion','swa'] as $field) {
+            if (TrackerMilestones::date($project[$field] ?? null) && $project[$field] > $today->format('Y-m-d')) {
+                $project['status'] = \App\Support\TrackerProjectInput::automaticStatus($project,$today); break;
+            }
+        }
         $alerts = TrackerMilestones::alerts($project, $settings, $today);
         $push = function (string $type, string $label) use (&$alerts, $project, $today): void {
             if (! $this->alertResolved($project, $type, $today)) {
@@ -959,7 +1000,7 @@ class TrackerDataController extends Controller
             }
         }
         $swa = $this->projectDate($project, 'swa');
-        if (strtolower(trim((string)($project['status'] ?? ''))) !== 'released' && !$swa && ($completion = $this->projectDate($project, 'completion'))) {
+        if (strtolower(trim((string)($project['status'] ?? ''))) !== 'released' && (!$swa || $swa->format('Y-m-d') > $today->format('Y-m-d')) && ($completion = $this->projectDate($project, 'completion'))) {
             $due = TrackerMilestones::weekday($completion->modify('+1 year'));
             if ($today >= $due) {
                 $push('award-overdue', 'SWA Due — Notify Contractor');

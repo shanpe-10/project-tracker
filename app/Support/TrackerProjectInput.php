@@ -4,7 +4,6 @@ use Illuminate\Validation\ValidationException;
 final class TrackerProjectInput
 {
     public const DATE_FIELDS = ['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completion'];
-    public const STATUSES = ['Pending', 'On-going Bidding', 'Pre-inspection', 'Final-inspection', 'Completed', 'Released'];
 
     public static function normalize(array $record): array
     {
@@ -13,32 +12,18 @@ final class TrackerProjectInput
         if ($days !== null && TrackerMilestones::date($record['contractRef'] ?? null)) {
             $record['contractEndDate'] = TrackerMilestones::dueDates($record)['contractDueDate'];
         }
-        $record['status'] = self::effectiveStatus($record);
+        $record['status'] = self::automaticStatus($record);
         return $record;
-    }
-
-    public static function effectiveStatus(array $record, ?\DateTimeImmutable $today = null): string
-    {
-        self::validateManualStatus($record);
-        $manual = $record['manualStatus'] ?? '';
-        return $manual !== '' ? $manual : self::automaticStatus($record, $today);
-    }
-
-    private static function validateManualStatus(array $record): void
-    {
-        $manual = $record['manualStatus'] ?? null;
-        if ($manual !== null && $manual !== '' && (! is_string($manual) || ! in_array($manual, self::STATUSES, true))) {
-            throw ValidationException::withMessages(['manualStatus' => 'Choose a valid manual operational status or use Automatic.']);
-        }
     }
 
     public static function automaticStatus(array $record, ?\DateTimeImmutable $today = null): string
     {
-        // Retain legacy explicit terminal statuses. New records use dates in
-        // Automatic mode, so clearing an override cannot latch its old status.
-        $status=array_key_exists('manualStatus', $record) ? '' : strtolower(trim((string)($record['status']??'')));
-        if(TrackerMilestones::date($record['swa']??null)||$status==='released') return 'Released';
-        if(TrackerMilestones::date($record['completion']??null)||$status==='completed') return 'Completed';
+        $status=strtolower(trim((string)($record['status']??'')));
+        $today = $today ?? now('Asia/Manila')->startOfDay()->toDateTimeImmutable();
+        $swa = TrackerMilestones::date($record['swa'] ?? null);
+        $completion = TrackerMilestones::date($record['completion'] ?? null);
+        if (($swa && $swa->format('Y-m-d') <= $today->format('Y-m-d')) || (!$swa && $status === 'released')) return 'Released';
+        if (($completion && $completion->format('Y-m-d') <= $today->format('Y-m-d')) || (!$completion && $status === 'completed')) return 'Completed';
         if(TrackerMilestones::date($record['finalInspection']??null)) return 'Pending';
         $end=TrackerMilestones::date(TrackerMilestones::dueDates($record)['contractDueDate']);
         $today=$today??new \DateTimeImmutable('today',new \DateTimeZone('Asia/Manila'));
@@ -51,6 +36,10 @@ final class TrackerProjectInput
     {
         foreach (self::DATE_FIELDS as $key) {
             $value = $record[$key] ?? '';
+            if (in_array($key, ['completion','swa'], true) && TrackerMilestones::date($value)
+                && $value > now('Asia/Manila')->format('Y-m-d')) {
+                throw ValidationException::withMessages([$key => 'Actual Completion and SWA dates cannot be in the future.']);
+            }
             // Keep unchanged historical values; reject new invalid calendar dates.
             if ($value === null || $value === '' || $value === '-' || $value === ($previous[$key] ?? null)) continue;
             if (!\App\Http\Controllers\TrackerDataController::validProjectDate($value)) {
@@ -88,7 +77,6 @@ final class TrackerProjectInput
 
     public static function validate(array $record): void
     {
-        self::validateManualStatus($record);
         if (isset($record['id']) && filter_var($record['id'], FILTER_VALIDATE_INT, ['options'=>['min_range'=>0]]) === false) throw ValidationException::withMessages(['id'=>'Invalid record ID.']);
         foreach (['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completion','updatedAt'] as $key) {
             if (isset($record[$key]) && !is_string($record[$key])) throw ValidationException::withMessages([$key=>"$key must be a date string."]);
@@ -103,12 +91,20 @@ final class TrackerProjectInput
                 throw ValidationException::withMessages([$key=>"$key must be text of up to $max characters."]);
             }
         }
-        foreach (['approvedBudget','bidAmount'] as $key) {
+        foreach (['approvedBudget','bidAmount','ldAmount'] as $key) {
             if (!isset($record[$key]) || $record[$key] === '' || $record[$key] === '-') continue;
-            if (!is_scalar($record[$key])) throw ValidationException::withMessages([$key=>"Invalid $key amount."]);
+            if (!is_string($record[$key]) && !is_int($record[$key]) && !is_float($record[$key])) throw ValidationException::withMessages([$key=>"Invalid $key amount."]);
             $value=preg_replace('/[₱$,\s]/u','',(string)$record[$key]);
             if (!preg_match('/^\d+(\.\d{1,2})?$/D',$value) || strlen(ltrim(explode('.',$value)[0],'0')) > 13) {
                 throw ValidationException::withMessages([$key=>"$key must be a non-negative amount with up to 13 integer digits and two decimal places."]);
+            }
+        }
+        foreach (['ldNoOfDays','ldActualDuration'] as $key) {
+            $value = $record[$key] ?? '';
+            if ($value === null || $value === '' || $value === '-') continue;
+            if ((!is_string($value) && !is_int($value) && !is_float($value)) || !preg_match('/^(?:\d+(?:\.\d*)?|\.\d+)$/D', trim((string)$value))
+                || !is_finite((float)$value) || (float)$value > 36500) {
+                throw ValidationException::withMessages([$key => "$key must be a non-negative number of days up to 36500. Decimals are allowed."]);
             }
         }
         foreach (['resolutionNumber','contractDuration','ldAmount','ldNoOfDays','ldActualDuration','remarks','createdAt','archivedAt','archivedBy','updatedBy','timelineMarkedDoneDate','timelineUnmarkedType','timelineUnmarkedAt'] as $key) {

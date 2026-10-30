@@ -118,7 +118,7 @@ async function refreshSharedProjectData() {
         sharedProjectVersion = database.projectVersion;
         showSharedUpdatesIndicator(false);
         if (activeWorkspace === "dashboard-done" && typeof renderMarkedDoneTabContents === "function") renderMarkedDoneTabContents();
-        if (activeWorkspace !== "dashboard" && typeof refreshGlobalNotifications === "function") refreshGlobalNotifications();
+        if (typeof refreshGlobalNotifications === "function") refreshGlobalNotifications();
         if (projectDetailsModalShown && projectDetailsEditId !== null) {
             const tx = database.transaction(["projects"], "readonly");
             tx.objectStore("projects").get(projectDetailsEditId).onsuccess = event => {
@@ -496,6 +496,28 @@ function setProjectSaveState(saving, message = "", failed = false) {
     }
 }
 
+// Shared by the project form and spreadsheet preview; enforced again by the server.
+function validateProjectNumbersAndActualDates(record) {
+    const errors = [];
+    const today = new Intl.DateTimeFormat('en-CA', {timeZone:'Asia/Manila',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+    for (const field of ['completion','swa']) {
+        if (record[field] && record[field] > today) errors.push(`${field}: actual dates cannot be in the future.`);
+    }
+    for (const field of ['approvedBudget','bidAmount','ldAmount']) {
+        const raw = String(record[field] ?? '').trim();
+        if (!raw || raw === '-') continue;
+        const value = raw.replace(/[₱$,\s]/g,'');
+        if (!/^\d+(\.\d{1,2})?$/.test(value) || value.split('.')[0].replace(/^0+/,'').length > 13) errors.push(`${field}: use a non-negative amount with up to two decimal places.`);
+    }
+    for (const field of ['ldNoOfDays','ldActualDuration','contractDuration']) {
+        const value = record[field];
+        if (value === '' || value === null || value === undefined || (field !== 'contractDuration' && value === '-')) continue;
+        const numeric = field === 'contractDuration' ? /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i : /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+        if (!numeric.test(String(value).trim()) || !Number.isFinite(Number(value)) || Number(value) > 36500 || (field === 'contractDuration' && Number(value) <= 0)) errors.push(`${field}: use ${field === 'contractDuration' ? 'a positive' : 'a non-negative'} number of days up to 36500. Decimals are allowed.`);
+    }
+    return errors;
+}
+
 function saveDocument() {
     if (projectSaveInProgress) return;
     const canEditCurrentProject = projectEditSource === "alerts" ? canEditAlertProjects() : canEditProjects();
@@ -505,7 +527,7 @@ function saveDocument() {
     }
     const titleEl = document.getElementById("title");
     const title = titleEl ? titleEl.value.trim() : "";
-
+    
     if (!title) {
         alert("'2. Project Title' is a required field.");
         return;
@@ -542,9 +564,7 @@ function saveDocument() {
     }
 
     const completionDate = getDateValue('completionDate');
-    const selectedStatus = getValue("status");
-    const manualStatus = selectedStatus && selectedStatus !== "Automatic" ? selectedStatus : null;
-    const statusValue = manualStatus || automaticProjectFormStatus();
+    const statusValue = automaticProjectFormStatus();
     if (editingId === null && statusValue.toLowerCase() === "completed" && !completionDate) {
         updateCompletionDateHint();
         document.getElementById("completionDate")?.focus();
@@ -595,21 +615,22 @@ function saveDocument() {
         preInspection: getDateValue("preInspection"),                // 20
         finalInspection: getDateValue("finalInspection"),            // 21
         swa: getValue("swa"),                                        // 22
-
+        
         // 23 Liquidated Damages subfields
         ldAmount: getValue("ldAmount"),
         ldNoOfDays: getValue("ldNoOfDays"),
         ldNewCompletionDate: getDateValue("ldNewCompletionDate"),
         ldActualDuration: getValue("ldActualDuration"),
-
+        
         completion: completionDate,                                    // 24
         status: statusValue,                                           // 25
-        manualStatus,
         remarks: getValue("remarks"),                                // 26
-
+        
         updatedAt: new Date().toISOString()
     };
 
+    const inputErrors = validateProjectNumbersAndActualDates(docPayload);
+    if (inputErrors.length) { showSystemNotification(inputErrors.join(' ')); return; }
     if (editingId === null) {
         // On creation: fetch existing projects to assign projectNo and detect duplicates
         const transaction = db.transaction(["projects"], "readonly");
@@ -724,13 +745,9 @@ function projectDuplicateAction(action) {
         addDocument(payload);
     } else if (action === 'delete') {
         if (existing && existing.id) {
-            const transaction = db.transaction(['projects'], 'readwrite');
-            const store = transaction.objectStore('projects');
-            store.delete(existing.id);
-            transaction.oncomplete = () => {
-                showSystemNotification('🗑️ Existing project deleted. Imported row will be added as new.');
-                addDocument(payload);
-            };
+            // The existing project must remain until admin confirmation.
+            openDeletionRequest({ targetType: "project", id: existing.id });
+            showSystemNotification('Request deletion first. Import the replacement after the administrator confirms deletion.');
         } else {
             addDocument(payload);
         }
@@ -753,7 +770,7 @@ function addDocument(payload) {
     payload.timelineAlertsCompleted = [];
     const transaction = db.transaction(["projects"], "readwrite");
     const store = transaction.objectStore("projects");
-
+    
     store.add(payload);
     transaction.onerror = event => {
         const message = event.target.error?.message || "Unable to add the project. Please try again.";
@@ -765,7 +782,7 @@ function addDocument(payload) {
         showSystemNotification(`🎉 Project successfully added: "${payload.title}"`);
         resetFormAccess();
         loadDocuments();
-
+        
         switchWorkspace("documents");
         checkForSharedProjectUpdates();
     };
@@ -897,6 +914,7 @@ async function loadServerProjectPage(silent = false) {
 
 function loadDocuments(skipServerRefresh = false) {
     if (window.currentUser?.role === "superadmin") return;
+    if (typeof refreshGlobalNotifications === "function") refreshGlobalNotifications();
     if (!db) return;
 
     if (activeWorkspace === "dashboard" && typeof loadDashboardData === "function") {
@@ -904,7 +922,6 @@ function loadDocuments(skipServerRefresh = false) {
         return;
     }
 
-    if (typeof refreshGlobalNotifications === "function") refreshGlobalNotifications();
     if (["documents", "archive"].includes(activeWorkspace)) {
         if (skipServerRefresh) {
             loadServerProjectPage();
@@ -1769,9 +1786,9 @@ const isAwardingOverdue =
                             <button
                                 type="button"
                                 onclick="deleteDocument(${doc.id})"
-                                class="btn btn-sm project-delete-button"
+                                class="btn btn-sm project-delete-button" aria-label="${window.currentUser?.role === 'admin' ? 'Delete project' : 'Request deletion'}" title="${window.currentUser?.role === 'admin' ? 'Delete project' : 'Request deletion'}"
                             >
-                                Delete
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg>
                             </button>
                         ` : ""}
 
@@ -1982,7 +1999,7 @@ function viewProjectDetails(id, source = "", { openAlerts = false } = {}) {
 
                 <div class="project-detail-grid">
 
-
+                    
 
 
                     ${field(
@@ -1991,10 +2008,10 @@ function viewProjectDetails(id, source = "", { openAlerts = false } = {}) {
                     )}
 
 
+                    
 
 
-
-
+                    
 
 
                     ${field(
@@ -2466,7 +2483,7 @@ function renderPaginationControls() {
 
     const startItem = totalItems === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1;
     const endItem = Math.min(currentPage * itemsPerPage, totalItems);
-
+    
     const infoEl = document.getElementById("paginationInfo");
     if (infoEl) infoEl.textContent = `Showing ${startItem}-${endItem} of ${totalItems} entries`;
 
@@ -2481,7 +2498,7 @@ function renderPaginationControls() {
         previousPage = page;
     });
     navHtml += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}"><a class="page-link" href="#" onclick="changePage(${currentPage + 1})">Next</a></li></ul>`;
-
+    
     const controlsEl = document.getElementById("paginationControls");
     if (controlsEl) controlsEl.innerHTML = navHtml;
 }
@@ -2495,11 +2512,11 @@ function changePage(page) {
 }
 
 const inputFieldsList = [
-    "biddingDate", "title", "approvedBudget", "bidAmount", "winningBidder",
-    "sourceOfFund", "sourceOfFundCustom", "prNumber", "prDate", "obre", "resolutionNumber",
-    "resolutionDate", "noticePostQual", "noaDueDate", "noa", "performanceBond", "contractRef",
-    "contractDuration", "ntpDate", "dole", "contractEndDate", "preInspection", "materialTestingDate",
-    "finalInspection", "swa", "ldAmount", "ldNoOfDays", "ldNewCompletionDate",
+    "biddingDate", "title", "approvedBudget", "bidAmount", "winningBidder", 
+    "sourceOfFund", "sourceOfFundCustom", "prNumber", "prDate", "obre", "resolutionNumber", 
+    "resolutionDate", "noticePostQual", "noaDueDate", "noa", "performanceBond", "contractRef", 
+    "contractDuration", "ntpDate", "dole", "contractEndDate", "preInspection", "materialTestingDate", 
+    "finalInspection", "swa", "ldAmount", "ldNoOfDays", "ldNewCompletionDate", 
     "ldActualDuration", "completionDate", "remarks"
 ];
 
@@ -2556,8 +2573,11 @@ function resumeSuspendedProjectDraft() {
 
 function automaticProjectFormStatus() {
     const value=id=>document.getElementById(id)?.value||'';
-    if(projectCalendarDate(value('swa'))) return 'Released';
-    if(projectCalendarDate(value('completionDate'))) return 'Completed';
+    const current=value('status').toLowerCase();
+    const today = timelineCalendarDay(new Date());
+    const swa = projectCalendarDate(value('swa')), completion = projectCalendarDate(value('completionDate'));
+    if((swa && value('swa') <= today)||(!swa && current==='released')) return 'Released';
+    if((completion && value('completionDate') <= today)||(!completion && current==='completed')) return 'Completed';
     if(projectCalendarDate(value('finalInspection'))) return 'Pending';
     const project={biddingDate:value('biddingDate'),contractRef:value('contractRef'),contractDuration:value('contractDuration'),contractEndDate:value('contractEndDate')};
     const end=getProjectMilestoneDates(project).contractDueDate;
@@ -2572,15 +2592,8 @@ function updateCompletionDateHint() {
     const hint = document.getElementById("completionDateHint");
     if (!status || !completionDate || !hint) return;
 
-    const automaticStatus = automaticProjectFormStatus();
-    const manual = Boolean(status.value && status.value !== "Automatic");
-    const automaticOption = Array.from(status.options || []).find(option => option.value === "Automatic");
-    if (automaticOption) automaticOption.textContent = `Automatic (${automaticStatus})`;
-    const help = document.getElementById("operationalStatusHelp");
-    if (help) help.textContent = manual
-        ? "Your selected status takes priority over automatic updates until you switch back to Automatic."
-        : `Current automatic status: ${automaticStatus}. Choose a status above to override automatic updates.`;
-    const isCompleted = String(manual ? status.value : automaticStatus).trim().toLowerCase() === "completed";
+    status.value = automaticProjectFormStatus();
+    const isCompleted = String(status.value || "").trim().toLowerCase() === "completed";
     const hasCompletionDate = Boolean(completionDate.value);
 
     hint.classList.toggle("d-none", !isCompleted);
@@ -3072,11 +3085,10 @@ function editDocument(id, source = "projects", options = {}) {
             doc.completion
         );
 
-        // Preserve undated legacy terminal records as an explicit choice when edited.
-        const legacyManual = !Object.prototype.hasOwnProperty.call(doc, "manualStatus") &&
-            ((doc.status === "Released" && !projectCalendarDate(doc.swa)) ||
-             (doc.status === "Completed" && !projectCalendarDate(doc.completion)));
-        setVal("status", doc.manualStatus || (legacyManual ? doc.status : "Automatic"));
+        setVal(
+            "status",
+            doc.status || "Pending"
+        );
 
         setVal(
             "remarks",
@@ -3288,9 +3300,8 @@ function resetFormAccess(options = {}) {
 
     if (statusEl) {
         statusEl.value =
-            "Automatic";
+            "Pending";
     }
-    updateCompletionDateHint();
 
 
     const titleArea =
@@ -3324,71 +3335,11 @@ function resetFormAccess(options = {}) {
 }
 
 function deleteDocument(id) {
-
     if (!canDeleteProjects()) {
-        showSystemNotification("You do not have permission to delete projects.");
+        showSystemNotification("You do not have permission to request deletion.");
         return;
     }
-
-    const confirmed =
-        confirm(
-            "Are you sure you want to permanently delete this project and its history?"
-        );
-
-
-    if (!confirmed) {
-        return;
-    }
-
-
-    const transaction =
-        db.transaction(
-            [
-                "projects",
-                "history"
-            ],
-            "readwrite"
-        );
-
-
-    const projectStore =
-        transaction.objectStore(
-            "projects"
-        );
-
-
-    // The server deletes project history in the same transaction.
-    projectStore.delete(id);
-
-    transaction.oncomplete = () => {
-
-        if (editingId === id) {
-            if (typeof stopProjectEditingPresence === "function") void stopProjectEditingPresence();
-            editingId = null;
-        }
-
-
-        showSystemNotification(
-            "Project and associated history successfully deleted."
-        );
-
-
-        loadDocuments();
-    };
-
-
-    transaction.onerror = (event) => {
-
-        console.error(
-            "Project deletion failed:",
-            event.target.error
-        );
-
-
-        alert(
-            "The project could not be deleted."
-        );
-    };
+    openDeletionRequest({ targetType: "project", id });
 }
 
 async function setDocumentArchived(id, archived) {

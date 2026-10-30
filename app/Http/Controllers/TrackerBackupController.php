@@ -256,6 +256,7 @@ class TrackerBackupController extends Controller
         if (! class_exists(\ZipArchive::class)) {
             throw new \RuntimeException('PHP ZIP support is unavailable.');
         }
+        \App\Support\TrackerProjectStatus::refresh();
         $destination = rtrim($destination, '\\/');
         $daily = $destination.DIRECTORY_SEPARATOR.'daily';
         if (! is_dir($daily) && ! mkdir($daily, 0770, true) && ! is_dir($daily)) {
@@ -279,15 +280,15 @@ class TrackerBackupController extends Controller
             file_put_contents($defaults, implode(':', array_map($escape, [$connection['host'], $connection['port'], $connection['database'], $connection['username'], $connection['password']])).PHP_EOL);
             @chmod($defaults, 0600);
             $arguments = [config('database.pg_dump'), '--no-password', '--format=plain', '--no-owner', '--no-privileges', '--host='.$connection['host'], '--port='.$connection['port'], '--username='.$connection['username'], '--file='.$sql, '--dbname='.$connection['database']];
-            // Dump only project rows/history/numbering. Accounts and system tables
+            // Include project workflow and audit evidence. Accounts and system tables
             // remain in the existing database when this data-only dump is restored.
             $schema = (string) DB::selectOne('SELECT current_schema() AS name')->name;
             $quote = fn (string $name) => '"'.str_replace('"', '""', $name).'"';
             $arguments[] = '--data-only';
-            foreach (['projects', 'history', 'project_number_sequences'] as $table) {
+            foreach (['projects', 'history', 'project_number_sequences', 'deletion_requests', 'deletion_request_targets', 'deletion_request_history_hidden', 'audit_log', 'import_jobs', 'import_job_changes', 'import_staging_chunks'] as $table) {
                 $qualified = $quote($schema).'.'.$quote($table);
                 $arguments[] = '--table='.$qualified;
-                $sequence = $table === 'project_number_sequences' ? null : DB::selectOne('SELECT pg_get_serial_sequence(?, ?) AS name', [$qualified, 'id'])->name;
+                $sequence = in_array($table, ['project_number_sequences','import_jobs','import_staging_chunks','deletion_request_history_hidden'], true) ? null : DB::selectOne('SELECT pg_get_serial_sequence(?, ?) AS name', [$qualified, 'id'])->name;
                 if ($sequence) $arguments[] = '--table='.$sequence;
             }
             $process = new Process($arguments, null, $this->nativeProcessEnvironment(['PGPASSFILE' => $defaults, 'PGPASSWORD' => false, 'PGSSLMODE' => $connection['sslmode'] ?? 'prefer']));
@@ -322,20 +323,20 @@ class TrackerBackupController extends Controller
             } else {
                 $this->addMediaFiles($zip, (string)config('tracker.attachments'), 'attachments');
             }
-            $zip->addFromString('README.txt', "Project-data backup\r\nContains project records, history, numbering, an Excel export and project attachments.\r\nIt excludes application code, user accounts/passwords, profile photos and system settings.\r\nRestore database.sql into a compatible tracker schema with the original user IDs/accounts present; it is a data-only dump, not a fresh system installation. Existing project rows must be handled before restoring to avoid duplicate IDs.\r\nRestore attachments into the configured project attachment directory. The spreadsheet can also be loaded through the existing import preview.\r\n");
+            $zip->addFromString('README.txt', "Project-data backup\r\nContains project records, history, numbering, deletion requests and decisions, import workflow, general audit evidence, an Excel export and project attachments.\r\nIt excludes application code, user accounts/passwords, profile photos and system settings.\r\nRestore database.sql into a compatible tracker schema with the original user IDs/accounts present; it is a data-only dump, not a fresh system installation. Existing project rows must be handled before restoring to avoid duplicate IDs.\r\nRestore attachments into the configured project attachment directory. The spreadsheet can also be loaded through the existing import preview.\r\n");
             if (! $zip->close()) {
                 throw new \RuntimeException('Unable to finish the backup archive.');
             }
             if (file_put_contents($archive.'.sha256', hash_file('sha256', $archive).'  '.basename($archive).PHP_EOL) === false) throw new \RuntimeException('Unable to write backup checksum.');
             $complete = true;
-            if (! TrackerMediaStore::cloud()) {
-                $this->createRotationCopy($archive, $destination, 'weekly', now('Asia/Taipei')->format('o-W'));
-                $this->createRotationCopy($archive, $destination, 'monthly', now('Asia/Taipei')->format('Y-m'));
+            if (!TrackerMediaStore::cloud()) {
+            $this->createRotationCopy($archive, $destination, 'weekly', now('Asia/Taipei')->format('o-W'));
+            $this->createRotationCopy($archive, $destination, 'monthly', now('Asia/Taipei')->format('Y-m'));
             }
 
             return $archive;
         } finally {
-            if (isset($zip) && ! $complete) { try { $zip->close(); } catch (\Throwable $ignored) {} }
+            if (isset($zip) && !$complete) { try { $zip->close(); } catch (\Throwable $ignored) {} }
             foreach ($mediaTemps as $temporary) @unlink($temporary);
             @unlink($defaults);
             @unlink($sql);
@@ -373,7 +374,7 @@ class TrackerBackupController extends Controller
             'preInspection' => 'Pre Inspection', 'finalInspection' => 'Final Inspection', 'swa' => 'SWA', 'ldAmount' => 'LD Amount',
             'ldNoOfDays' => 'LD Days', 'ldNewCompletionDate' => 'Extended Completion Date',
             'ldActualDuration' => 'Actual Construction Duration', 'completion' => 'Completion Date',
-            'status' => 'Operational Status', 'manualStatus' => 'Manual Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date', 'archivedAt' => 'Archived At', 'archivedBy' => 'Archived By',
+            'status' => 'Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date', 'archivedAt' => 'Archived At', 'archivedBy' => 'Archived By',
         ];
         $rows = [array_values($columns)];
         DB::table('projects')->select('data', 'archived_at')

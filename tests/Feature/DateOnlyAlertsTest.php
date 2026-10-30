@@ -37,7 +37,7 @@ class DateOnlyAlertsTest extends TestCase
 
     private function api(array $body, string $endpoint = 'data.php')
     {
-        return $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token', 'date-only-token')->postJson('/api/'.$endpoint, $body);
+        $response = $this->withSession($this->session)->withHeader('X-CSRF-Token', 'date-only-token')->postJson('/api/'.$endpoint, $body); return $this->finishImportFixture($response,$body,$endpoint);
     }
 
     private function project(array $extra = []): array
@@ -84,10 +84,10 @@ class DateOnlyAlertsTest extends TestCase
         $record = $this->api(['projectId'=>$record['id'], 'record'=>json_encode(array_replace($record, ['remarks'=>'Attachment path also retains flags']))], 'project-edit.php')->assertOk()->assertJsonPath('record.timelineAlertsCompleted', ['noa-overdue','ntp-overdue'])->json('record');
         $record = $this->api(['action'=>'saveTimelineRecord', 'record'=>array_replace($record, ['timelineAlertsCompleted'=>['ntp-overdue']]),
             'history'=>['action'=>'Restore historical alert', 'details'=>'Reopened NOA']])->assertOk()->assertJsonPath('record.timelineAlertsCompleted', ['ntp-overdue'])->json('record');
-        $this->assertSame(2, DB::table('history')->count()); // Attachment edit and atomic restore.
+        $this->assertSame(3, DB::table('history')->count()); // Attachment edit and atomic restore.
         $this->api(['action'=>'saveTimelineRecord', 'record'=>array_replace($record, ['timelineAlertsCompleted'=>['ntp-overdue','noa-overdue']]),
             'history'=>['action'=>'Re-add flag']])->assertUnprocessable();
-        $this->assertSame(2, DB::table('history')->count());
+        $this->assertSame(3, DB::table('history')->count());
     }
 
     public function test_historical_global_flags_can_be_restored_and_permission_is_required(): void
@@ -105,7 +105,7 @@ class DateOnlyAlertsTest extends TestCase
         DB::table('users')->where('id',1)->update(['can_resolve_alerts'=>false]);
         $record = $this->project(['biddingDate'=>'2026-09-01', 'contractEndDate'=>'2026-10-01']);
         $record = $this->api(['action'=>'saveProject', 'record'=>array_replace($record, ['noa'=>'2026-10-09', 'ntpDate'=>'2026-10-09', 'preInspection'=>'2026-10-09', 'materialTestingDate'=>'2026-10-09', 'finalInspection'=>'2026-10-09'])])->assertOk()->assertJsonPath('record.status', 'Pending')->json('record');
-        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=projectAlerts&projectId='.$record['id'])->assertOk()
+        $this->withSession($this->session)->getJson('/api/data.php?action=projectAlerts&projectId='.$record['id'])->assertOk()
             ->assertJsonFragment(['label'=>'Notice of Award','status'=>'Resolved','doneDate'=>'2026-10-09'])
             ->assertJsonFragment(['label'=>'Notice to Proceed','status'=>'Resolved','doneDate'=>'2026-10-09'])
             ->assertJsonFragment(['label'=>'Final Inspection','status'=>'Resolved','doneDate'=>'2026-10-09']);

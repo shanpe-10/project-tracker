@@ -7,9 +7,7 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
-        // New installations already include this table in the initial PostgreSQL schema.
-        if (Schema::hasTable('project_editing_presence')) return;
-        Schema::create('project_editing_presence', function (Blueprint $table) {
+        if (! Schema::hasTable('project_editing_presence')) Schema::create('project_editing_presence', function (Blueprint $table) {
             $table->unsignedBigInteger('user_id');
             $table->string('editor_token', 32);
             $table->unsignedBigInteger('project_id');

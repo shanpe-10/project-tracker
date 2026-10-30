@@ -21,7 +21,7 @@
         rel="stylesheet"
     >
 
-    <link rel="stylesheet" href="css/styles.css?v=20261011-account-sessions">
+    <link rel="stylesheet" href="css/styles.css?v=20261030-role-guides">
 </head>
 
 
@@ -276,6 +276,12 @@
             >
                 <span class="sidebar-nav-icon" aria-hidden="true">✓</span>
                 <span>Resolved Alerts</span>
+            </button>
+
+            <button type="button" class="nav-link d-none" id="deletionRequestsNav" data-project-navigation onclick="openDeletionRequests()">
+                <span class="sidebar-nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></span>
+                <span>Deletion requests</span>
+                <span id="deletionRequestsBadge" class="badge bg-warning text-dark ms-auto" hidden>0</span>
             </button>
 
             <button
@@ -1047,7 +1053,7 @@ ADD / EDIT PROJECT
                                     <div class="row g-3">
 
 
-
+                                        
 
 
                                         <div class="col-12">
@@ -1091,10 +1097,10 @@ ADD / EDIT PROJECT
                                         </div>
 
 
+                                        
 
 
-
-
+                                        
 
 
                                         <div class="col-md-4">
@@ -1232,7 +1238,7 @@ ADD / EDIT PROJECT
                                                 class="form-label"
                                             >
                                                 Winning Bidder
-
+                                                
                                             </label>
 
                                             <input
@@ -1675,9 +1681,7 @@ ADD / EDIT PROJECT
                                             <select
                                                 id="status"
                                                 class="form-select"
-                                                aria-describedby="operationalStatusHelp"
                                             >
-                                                <option value="Automatic">Automatic — based on project dates</option>
 
                                                 <option value="Pending">
                                                     Pending
@@ -1704,7 +1708,6 @@ ADD / EDIT PROJECT
                                                 </option>
 
                                             </select>
-                                            <div id="operationalStatusHelp" class="form-helper" aria-live="polite">Choose a status to override automatic updates, or choose Automatic to use project dates.</div>
 
                                         </div>
 
@@ -1776,6 +1779,9 @@ ADD / EDIT PROJECT
                                             <input
                                                 type="number"
                                                 id="ldNoOfDays"
+                                                min="0"
+                                                max="36500"
+                                                step="any"
                                                 class="form-control"
                                                 placeholder="0"
                                             >
@@ -2313,7 +2319,7 @@ ADD / EDIT PROJECT
                                 onclick="promptClearDatabaseSystem()"
                                 class="btn btn-outline-danger btn-sm"
                             >
-                                Delete All Records
+                                <span id="deleteAllRecordsLabel">Request deletion of all records</span>
                             </button>
 
                         </section>
@@ -2334,11 +2340,11 @@ ADD / EDIT PROJECT
                         </div>
                         <div id="accountManagementCard" class="card account-directory-card">
                             <div class="card-body p-0">
-                                <div class="account-directory-toolbar"><div><h2>Account directory</h2><p id="accountDirectorySummary">Manage accounts and access permissions.</p></div><button type="button" class="btn btn-primary" onclick="openAccountEditor()">Create account</button></div>
+                                <div class="account-directory-toolbar"><div class="account-directory-heading"><span class="account-directory-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><div><h2>Account directory</h2><p id="accountDirectorySummary" aria-live="polite">Manage accounts and access.</p></div></div><div class="account-directory-tools"><label class="account-search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><span class="visually-hidden">Find an account</span><input id="accountDirectorySearch" type="search" placeholder="Find name or username" oninput="filterAccountDirectory()" autocomplete="off"></label><button type="button" class="btn account-directory-passwords" onclick="openAllUserPasswords()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg><span>View all passwords</span></button><button type="button" class="btn btn-primary account-directory-create" onclick="openAccountEditor()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Create account</span></button></div></div>
                                 <div id="accountRequestsMessage" class="p-4 text-muted">Loading accounts…</div>
                                 <div class="table-responsive">
                                     <table class="table table-hover mb-0" aria-label="Account directory">
-                                        <thead><tr><th scope="col">Full name</th><th scope="col">Username</th><th scope="col">Role</th><th scope="col">Status / access</th><th scope="col">Created</th><th scope="col" class="text-end">Actions</th></tr></thead>
+                                        <thead><tr><th scope="col">Account</th><th scope="col">Role &amp; access</th><th scope="col">Password</th><th scope="col" class="text-end">Manage</th></tr></thead>
                                         <tbody id="accountRequestsList"></tbody>
                                     </table>
                                 </div>
@@ -2346,7 +2352,7 @@ ADD / EDIT PROJECT
                         </div>
 
                         <section id="holidayCalendarCard" hidden class="d-none account-audit-card mt-4" aria-labelledby="holidayCalendarTitle">
-                            <div class="account-audit-header"><div><div class="dashboard-eyebrow">Working-day calendar</div><h2 id="holidayCalendarTitle" class="account-audit-title">Philippine holidays</h2></div><button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadHolidayCalendar()">Refresh</button></div>
+                            <details class="account-calendar-details"><summary class="account-calendar-toggle"><span class="account-calendar-summary"><span class="dashboard-eyebrow">Working-day calendar</span><strong id="holidayCalendarTitle">Philippine holidays</strong><small>Set working days and manage holiday dates.</small></span><span class="account-calendar-open">Manage calendar <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></span></summary><div class="account-calendar-refresh"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadHolidayCalendar()">Refresh calendar</button></div>
                             <div class="p-4">
                                 <p id="holidaySyncStatus" class="mb-2">Loading holiday calendar…</p>
                                 <p class="text-muted small">Checks official Presidential Communications Office announcements daily at 03:00 Philippine time, with hourly retries after failures. The saved calendar remains available offline. Choose non-working weekdays and whether holidays are excluded. Use each date’s action to include or exclude an individual holiday.</p>
@@ -2364,7 +2370,7 @@ ADD / EDIT PROJECT
                                 <label class="form-label" for="holidayCalendarYear">Calendar year</label><select id="holidayCalendarYear" class="form-select mb-3" style="max-width:160px" onchange="renderHolidayCalendar()"></select>
                                 <div class="table-responsive"><table class="table"><thead><tr><th>Date</th><th>Holiday</th><th>Day type / source</th><th>Action</th></tr></thead><tbody id="holidayCalendarRows"></tbody></table></div>
                             </div>
-                        </section>
+                        </details></section>
                         <section data-admin-section class="account-audit-card mt-4" aria-labelledby="timelineSettingsTitle">
                             <div class="account-audit-header">
                                 <div>
@@ -2412,7 +2418,7 @@ ADD / EDIT PROJECT
                             <div class="backup-settings-body">
                                 <label class="form-label" for="backupDestinationPath">{{ config('tracker.cloud') ? 'Backup storage' : 'Destination folder' }}</label>
                                 <div class="backup-destination-row">
-                                    <input id="backupDestinationPath" class="form-control" type="text" spellcheck="false" onchange="saveBackupSettings('Backup destination saved.')" placeholder="D:\LGU Backups" @if(config('tracker.cloud')) readonly @endif>
+                                    <input id="backupDestinationPath" @if(config('tracker.cloud')) readonly @endif class="form-control" type="text" spellcheck="false" onchange="saveBackupSettings('Backup destination saved.')" placeholder="D:\LGU Backups">
                                     @if(!config('tracker.cloud'))
                                     <button type="button" id="browseBackupDestinationButton" class="btn btn-outline-secondary" onclick="browseBackupDestination()">Browse…</button>
                                     <button type="button" class="btn btn-outline-secondary" onclick="useDefaultBackupDestination()">Use default</button>
@@ -2423,7 +2429,7 @@ ADD / EDIT PROJECT
                                     @endif
                                 </div>
                                 <p id="backupSettingsStatus" class="backup-settings-status">Loading backup settings…</p>
-                                <p class="form-text mb-0">Automatic and manual backups include project records, history, numbering, an Excel export and project attachments only. @if(config('tracker.cloud'))Private storage retains the latest snapshot of seven days, four weeks and three months. Automatic backups run while the pilot server is awake.@else Daily, weekly, and monthly copies are saved in this location.@endif</p>
+                                <p class="form-text mb-0">Backups include projects, Logs, deletion decisions, import workflow, activity evidence, numbering, the Excel export and attachments. @if(config('tracker.cloud')) Copies stay in private cloud storage. Automatic backups run while the server is awake; you can download the latest copy here. @else Daily, weekly, and monthly copies are saved in this location. @endif</p>
                             </div>
                         </section>
                     </section>
@@ -2698,89 +2704,18 @@ ADD / EDIT PROJECT
 
 
     <div class="modal fade" id="systemGuideModal" tabindex="-1" aria-labelledby="systemGuideTitle" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
-                    <div class="guide-heading"><span class="guide-book" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5.5C8.5 3 5 3 2 4.5v15C5 18 8.5 18 12 20.5c3.5-2.5 7-2.5 10-1v-15C19 3 15.5 3 12 5.5Zm0 0v15"/></svg></span><div><span class="guide-eyebrow">Project Tracker · Help center</span><h5 class="modal-title" id="systemGuideTitle">How to use the Project Tracker</h5><p>Choose a topic to find the steps you need.</p></div></div>
+                    <div class="guide-heading"><span class="guide-book" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 5.5C8.5 3 5 3 2 4.5v15C5 18 8.5 18 12 20.5c3.5-2.5 7-2.5 10-1v-15C19 3 15.5 3 12 5.5Zm0 0v15"/></svg></span><div><h5 class="modal-title" id="systemGuideTitle">Your guide</h5><p id="guideDescription">Find the controls you need on the main page.</p></div></div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-<div id="projectUserGuideContent" class="guide-layout" data-tracker-guide>
-        <aside class="guide-sidebar">
-            <div><label class="guide-search-label" for="projectUserGuideContent-search">Find a topic</label><div class="guide-search-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="projectUserGuideContent-search" type="search" data-guide-search placeholder="Search the guide" autocomplete="off"></div></div>
-            <nav class="guide-topics" aria-label="Guide topics"><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-1" aria-current="true"><span class="guide-topic-number">01</span><span>Getting started</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-2" aria-current="false"><span class="guide-topic-number">02</span><span>Dashboard &amp; notifications</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-3" aria-current="false"><span class="guide-topic-number">03</span><span>Find projects</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-4" aria-current="false"><span class="guide-topic-number">04</span><span>Add &amp; edit projects</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-5" aria-current="false"><span class="guide-topic-number">05</span><span>Milestones &amp; status</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-6" aria-current="false"><span class="guide-topic-number">06</span><span>Resolve &amp; restore alerts</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-7" aria-current="false"><span class="guide-topic-number">07</span><span>Details, print &amp; audit trail</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-8" aria-current="false"><span class="guide-topic-number">08</span><span>Project attachments</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-9" aria-current="false"><span class="guide-topic-number">09</span><span>Import, export &amp; archive</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-10" aria-current="false"><span class="guide-topic-number">10</span><span>Shared updates &amp; editors</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-11" aria-current="false"><span class="guide-topic-number">11</span><span>Admin operations</span></button><button type="button" class="guide-topic-button" aria-controls="projectUserGuideContent-topic-12" aria-current="false"><span class="guide-topic-number">12</span><span>Profile &amp; sign out</span></button></nav>
-            <label class="guide-mobile-topics" for="projectUserGuideContent-select">Choose a topic<select id="projectUserGuideContent-select" class="form-select" data-guide-select><option value="projectUserGuideContent-topic-1">01 · Getting started</option><option value="projectUserGuideContent-topic-2">02 · Dashboard &amp; notifications</option><option value="projectUserGuideContent-topic-3">03 · Find projects</option><option value="projectUserGuideContent-topic-4">04 · Add &amp; edit projects</option><option value="projectUserGuideContent-topic-5">05 · Milestones &amp; status</option><option value="projectUserGuideContent-topic-6">06 · Resolve &amp; restore alerts</option><option value="projectUserGuideContent-topic-7">07 · Details, print &amp; audit trail</option><option value="projectUserGuideContent-topic-8">08 · Project attachments</option><option value="projectUserGuideContent-topic-9">09 · Import, export &amp; archive</option><option value="projectUserGuideContent-topic-10">10 · Shared updates &amp; editors</option><option value="projectUserGuideContent-topic-11">11 · Admin operations</option><option value="projectUserGuideContent-topic-12">12 · Profile &amp; sign out</option></select></label>
-        </aside>
-        <div class="guide-reading-pane"><p class="guide-intro">Use this guide for Admin and Staff project work. The tracker stores saved records on the shared server. Your available actions depend on your account permissions.</p><section id="projectUserGuideContent-topic-1" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-1-title"><span class="guide-topic-kicker">Access &amp; permissions</span><h2 id="projectUserGuideContent-topic-1-title">Sign in, navigation and permissions</h2><ol>
-        <li>Open the tracker link provided by IT and sign in with your own username and password. Contact IT for a new account, password assistance or unavailable actions. Staff cannot register their own accounts.</li>
-        <li>Use Workspace to open <strong>Dashboard, Add Project, View All Projects, Resolved Alerts, Historical Archive</strong> and, for Admin, <strong>Admin</strong>. On smaller screens, open the navigation menu to switch pages.</li>
-        <li><strong>Admin</strong> has all project permissions and can manage shared timeline settings, recent activity and project backups. <strong>Staff</strong> can view records, details, history, alerts, attachments and printable summaries. IT separately grants <strong>Add, Edit, Import, Export, Delete, Delete all, Restore historical alerts</strong> and <strong>Archive/restore</strong>. Permission to resolve alerts does not grant permission to edit milestone dates.</li>
-    </ol></section><section id="projectUserGuideContent-topic-2" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-2-title" hidden><span class="guide-topic-kicker">Stay up to date</span><h2 id="projectUserGuideContent-topic-2-title">Dashboard and notifications</h2><ol>
-        <li>The <strong>Total Projects, Pending</strong> and <strong>Active Alerts</strong> cards open their corresponding project views. Counts cover non-archived projects. Use the status chart’s month/year filters and Monthly Completions’ year filter to explore the registry.</li>
-        <li><strong>Recently updated projects</strong> shows saved changes. <strong>Needs attention</strong> groups alerts by project; search and use Previous/Next to review additional pages.</li>
-        <li>Select a project title for its details, or <strong>Alerts</strong> for individual reminders, deadlines and resolution dates. The notification bell works on every page. Selecting a project or its Alerts button closes Notifications and opens that project.</li>
-    </ol></section><section id="projectUserGuideContent-topic-3" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-3-title" hidden><span class="guide-topic-kicker">Search &amp; filters</span><h2 id="projectUserGuideContent-topic-3-title">Search, filters and project details</h2><ol>
-        <li>In <strong>View All Projects</strong>, choose <strong>Active projects, Completed projects, Released projects, Active alerts</strong> or <strong>All projects</strong>. Archived records are in <strong>Historical Archive</strong>.</li>
-        <li>Search records and combine the status, exact project number, barangay and selected milestone date filters. Select a date field, then its month, day or year as needed. Clear filters when a record is missing from your results.</li>
-        <li>Select the project-number heading to reverse the sort order. Use pagination for more results. Select a title to open <strong>Project Details</strong>, including financial information, dates, remarks, attachments and Alerts.</li>
-        <li>Use <strong>History</strong> to review saved edits and timeline actions in the project’s <strong>Audit Trail</strong>. Each entry shows when the change was saved and the user who made it; older entries without a recorded user show <strong>Not recorded</strong>. Use <strong>Print</strong> to open the formatted summary, then your browser’s print or Save as PDF option. Printed summaries are reference copies.</li>
-    </ol></section><section id="projectUserGuideContent-topic-4" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-4-title" hidden><span class="guide-topic-kicker">Record your project</span><h2 id="projectUserGuideContent-topic-4-title">Add and edit project records</h2><ol>
-        <li>Choose <strong>Add Project</strong>. Enter the required <strong>Project Title</strong> and <strong>Approved Budget for the Contract</strong>. Include the location in the title, for example “Residential Building at Brgy. 1”. Add the bidding date and winning bidder when available. The next project number is a preview; the server confirms the assigned number when saving.</li>
-        <li>Complete the relevant sections: project information and fund source (use <strong>Others</strong> for a custom source); bidding and bid amount; bidder; purchase request and obligation dates; resolution; post qualification; NOA deadline and issuance; performance bond; contract date and duration; NTP; DOLE clearance; inspection, testing, SWA and completion; liquidated damages; and remarks.</li>
-        <li>Enter amounts as non-negative numbers with at most two decimal places. Enter <strong>Contract Duration</strong> as a positive number of working days, such as <strong>30</strong> or <strong>30.5</strong>. Do not append “days”. The Contract Due Date is calculated from the Contract Date and duration. Liquidated-damages fields record the amount, number of days, revised completion date and actual duration; entering a revised date does not replace the calculated contract deadline.</li>
-        <li>Select <strong>Save Project</strong> and wait for confirmation. To update a project, use its <strong>Edit</strong> action, review the fields and choose <strong>Apply Records Change</strong>. <strong>Cancel</strong> or the editor’s close button discards unsaved edits.</li>
-        <li>The save button shows <strong>Saving</strong> while the request is in progress. A successful save shows a brief confirmation, and the header message clears. <strong>Save failed</strong> remains visible and leaves your draft open for correction. Only a successful server response confirms saving. If saving succeeds but the view update fails, the notification distinguishes the saved record from the pending refresh.</li>
-    </ol></section><section id="projectUserGuideContent-topic-5" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-5-title" hidden><span class="guide-topic-kicker">Track progress</span><h2 id="projectUserGuideContent-topic-5-title">Milestone deadlines, actual dates and status</h2><div class="table-responsive">
-        <table class="table table-sm table-bordered">
-            <thead><tr><th scope="col">Milestone</th><th scope="col">Deadline / entry</th><th scope="col">How to resolve</th></tr></thead>
-            <tbody>
-                <tr><td data-label="Milestone">Notice of Award (NOA)</td><td data-label="Deadline / entry">Enter <strong>NOA Due Date</strong> separately from the actual <strong>NOA Issued Date</strong>.</td><td data-label="How to resolve">Record the actual issuance date.</td></tr>
-                <tr><td data-label="Milestone">Pre-inspection</td><td data-label="Deadline / entry">One calendar month after Bidding Date.</td><td data-label="How to resolve">Record <strong>Pre Inspection</strong>.</td></tr>
-                <tr><td data-label="Milestone">Notice to Proceed (NTP)</td><td data-label="Deadline / entry">One calendar month after Bidding Date.</td><td data-label="How to resolve">Record the actual <strong>Notice to Proceed</strong> date.</td></tr>
-                <tr><td data-label="Milestone">Material testing</td><td data-label="Deadline / entry">One calendar month after Bidding Date.</td><td data-label="How to resolve">Record <strong>Material Testing Date</strong>.</td></tr>
-                <tr><td data-label="Milestone">Final inspection</td><td data-label="Deadline / entry">Calculated Contract Due Date; when contract date/duration are absent, a saved Contract End Date is used.</td><td data-label="How to resolve">Record <strong>Final Inspection</strong>.</td></tr>
-                <tr><td data-label="Milestone">SWA follow-up</td><td data-label="Deadline / entry">One year after <strong>Completion Date</strong>, moved to a working date.</td><td data-label="How to resolve">Record <strong>Statement of Work Accomplished Date</strong>.</td></tr>
-            </tbody>
-        </table>
-    </div>
-    <p>Choose a status directly in the <strong>Operational Status</strong> dropdown to give it priority over project dates and automatic updates. Choose <strong>Automatic</strong> in the same dropdown to recalculate from dates. Manual Completed still requires a Completion Date for new completed records.</p><p>Calculated due dates are read-only and do not fill actual dates. Calendar-month deadlines clamp to the last valid day of the next month, then move to the next working day if necessary. Admin controls reminder lead times; final-inspection reminders default to <strong>7 working days</strong> before the contract deadline. A valid actual milestone date on or before today resolves its alerts. A future actual date remains scheduled and does not resolve the reminder early.</p>
-    <p>Status follows recorded milestones: no bidding date → <strong>On-going Bidding</strong>; bidding date → <strong>Pre-inspection</strong>; actual pre-inspection, material-testing and NTP dates all present → <strong>Pending</strong>. At the contract deadline, missing final inspection produces <strong>Final-inspection</strong>. Entering a valid <strong>Final Inspection Date</strong> sets the status to <strong>Pending</strong>, even before the contract deadline or when earlier milestone dates are missing. Completion Date produces <strong>Completed</strong>; SWA Date produces <strong>Released</strong>, which takes priority. A project explicitly kept Completed/Released retains that status. A Completed project requires a Completion Date and appears in Monthly Completions for that date’s month/year.</p>
-    <p>Status colors: <strong>Pending—amber; On-going Bidding—blue; Pre-inspection—cyan; Final-inspection—purple; Completed—green; Released—teal.</strong> Read the label as well as its color. Completed projects can still need SWA follow-up until SWA is recorded.</p></section><section id="projectUserGuideContent-topic-6" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-6-title" hidden><span class="guide-topic-kicker">Keep reminders accurate</span><h2 id="projectUserGuideContent-topic-6-title">Resolve and restore alerts</h2><ol>
-        <li>Choose <strong>Edit</strong> on the project, record the actual milestone date and save. Use <strong>Alerts</strong> in the project details or editor to check alert statuses and dates. NOA, pre-inspection, NTP, material-testing, final-inspection and SWA alerts resolve from their dates. Editing requires project-edit permission.</li>
-        <li>Alerts resolve automatically from a valid actual milestone date on or before today, including older NOA and NTP reminders. A future date stays scheduled until that date. Recording or correcting a milestone requires <strong>Edit</strong> permission.</li>
-        <li><strong>Resolved Alerts</strong> groups completed reminders by milestone. Use its search/date filters and category pages to review them. <strong>Restore</strong> reopens a historical manually resolved reminder and requires the <strong>Restore historical alerts</strong> permission. Automatically resolved entries offer <strong>View</strong>; edit or clear the actual date to reopen the reminder when due. Existing historical manual flags may also need restoring.</li>
-    </ol></section><section id="projectUserGuideContent-topic-7" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-7-title" hidden><span class="guide-topic-kicker">Review your records</span><h2 id="projectUserGuideContent-topic-7-title">Working dates and Philippine holidays</h2><p>The shared working-day calendar controls durations, reminder lead times and selectable dates. Saturdays, Sundays and Philippine non-working holidays are excluded by default. Shaded non-working dates cannot be selected; unchanged historical dates remain available for reference. Calculated deadlines move forward to a working day. Contact IT about calendar corrections; calendar-management instructions are in the separate account-management guide.</p></section><section id="projectUserGuideContent-topic-8" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-8-title" hidden><span class="guide-topic-kicker">Files &amp; documents</span><h2 id="projectUserGuideContent-topic-8-title">Attachments</h2><ol>
-        <li>Save a new project first, then edit it to add attachments. Choose files and use <strong>Add</strong>. PDF, Word, Excel, text and image files are supported, up to <strong>25 MB each</strong> and <strong>20 uploaded files per save</strong>.</li>
-        <li>Added files and removals remain pending until <strong>Apply Records Change</strong> succeeds. A pending attachment draft may be restored in the same browser/account after reopening the page; it has not been uploaded until you save. Cancel discards the draft.</li>
-        <li>Select a filename to preview it, or <strong>Download</strong> to save a copy. Preview availability depends on file type/browser support. Editing permission is required to add or remove files.</li>
-    </ol></section><section id="projectUserGuideContent-topic-9" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-9-title" hidden><span class="guide-topic-kicker">Manage the registry</span><h2 id="projectUserGuideContent-topic-9-title">Import, export, archive and deletion</h2><ol>
-        <li>With Import permission, choose <strong>Import</strong> and <strong>Download template</strong>. Keep headings, use one project per row, <strong>YYYY-MM-DD</strong> working dates and non-negative amounts with at most two decimals. Choose a CSV or Excel file.</li>
-        <li>Review and edit the preview, scrolling horizontally for all columns. Correct invalid rows; invalid rows are skipped. For each duplicate, choose <strong>Add as a new project</strong> or <strong>Overwrite existing project</strong>; review bulk choices carefully. Choose <strong>Import reviewed rows</strong> and wait for the progress result.</li>
-        <li>Review imported/skipped counts and any errors. Use <strong>Roll back import</strong> when offered to undo that batch. The server can refuse rollback if later edits would be lost. A failed batch attempts automatic rollback; read whether rollback was confirmed.</li>
-        <li><strong>Export Excel</strong> downloads all records matching the current lifecycle and filters, across all pages. Check the view and filters before exporting; use Historical Archive to export archived records.</li>
-        <li><strong>Archive</strong> keeps a project and its history for reference and removes it from the active dashboard/alerts. View it in <strong>Historical Archive</strong>; use <strong>Restore</strong> with archive permission to return it.</li>
-        <li><strong>Delete</strong> permanently removes a project and its history. <strong>Delete all records</strong> requires its separate permission and confirmation and removes all project records/history, including archives. Review the offered Excel export before confirming; it is not a full attachment backup.</li>
-    </ol></section><section id="projectUserGuideContent-topic-10" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-10-title" hidden><span class="guide-topic-kicker">Work together</span><h2 id="projectUserGuideContent-topic-10-title">Shared updates and simultaneous editing</h2><p>Visible tabs check for shared changes about every <strong>3 seconds</strong> and immediately when you return to the tab. Lists, dashboards and open project details update automatically when connected. Hidden/background tabs catch up when you return. Updates wait while you edit or review an import; the <strong>Updates available</strong> button indicates pending changes. Save or cancel your draft to load them safely.</p>
-    <p>Two people may edit the same project. The first successful save changes its version; a later stale save is rejected. Your draft remains open. Copy the changes you need, cancel, reopen the latest project and reapply them after reviewing the other person’s work. Changes are not automatically merged.</p>
-    <p><strong>Editing indicators</strong> appear below the project title in Project Details and the edit form. They show <strong>No one is editing</strong> when idle, or names and avatars when someone opens <strong>Edit</strong> for that same project. The project list also shows names when editors are active. Viewing Project Details alone does not register you as an editor. They refresh about every <strong>3 seconds</strong>. <strong>Checking editors…</strong> means the initial check is pending; <strong>Editing status unavailable</strong> means the check failed. A successful save, canceling, closing the editor or signing out clears your indicator. An unexpected disconnect or a suspended background tab can take up to <strong>45 seconds</strong> to disappear. The indicator allows simultaneous editing; it does not lock the project, show live typing or share unsaved changes.</p></section><section id="projectUserGuideContent-topic-11" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-11-title" hidden><span class="guide-topic-kicker">For administrators</span><h2 id="projectUserGuideContent-topic-11-title">Admin operations</h2><ol>
-        <li><strong>Admin → Timeline day settings</strong>: choose standard durations or <strong>Custom</strong> values from 1–3,650 working days, then <strong>Save timeline days</strong>. Settings cover NOA, shared pre-inspection/NTP/material reminders, SWA and final inspection. Reminder settings change when alerts appear; the bidding-based deadlines remain one calendar month after bidding.</li>
-        <li><strong>Recent activity → Refresh</strong> reloads recorded actions. <strong>Clear history</strong> requires confirmation and clears the visible recent-activity list; older audit entries remain stored. This is separate from an individual project’s Audit Trail.</li>
-        <li><strong>Automatic project backups</strong>: @if(config('tracker.cloud'))backups are saved in private cloud storage. Use <strong>Download latest backup</strong> to keep a copy. The free pilot server runs automatic backups while awake, with one automatic snapshot per day and hourly checks. Retention covers the latest snapshot of seven days, four weeks and three months.@else Set the destination using <strong>Browse</strong>, <strong>Use default</strong> or the path field. Scheduled daily/weekly/monthly copies need the server scheduler configured by IT.@endif Use the On/Off control to save the preference. <strong>Back up projects now</strong> creates a manual archive. Check its result and latest-backup details.</li>
-        <li>Project backups include records, history, numbering, an Excel export and project attachments. Ask IT for restoration or a full-system backup; these project backups do not include accounts or profile photos.</li>
-    </ol></section><section id="projectUserGuideContent-topic-12" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="projectUserGuideContent-topic-12-title" hidden><span class="guide-topic-kicker">Your account</span><h2 id="projectUserGuideContent-topic-12-title">Profile and sign out</h2><p>Each account has one active browser session. Signing in on another browser or device signs out the previous session; tabs in the same browser can stay open. Admin and Staff are signed out after <strong>30 minutes without typing, clicking or scrolling</strong>. Background updates do not extend this timer. A warning appears one minute before expiry; choose <strong>Stay signed in</strong> to continue. Every session ends after eight hours. If a session ends while editing, sign in with the same account in the same tab to recover the draft. Do not refresh or close that tab before recovery; unsaved fields are kept only in that tab’s memory. Review restored changes before saving.</p><ol><li>Open your top-right avatar → <strong>Edit profile</strong> to change your display name or photo. Use a JPG, PNG or WebP up to 3 MB, position the crop and save. Choose <strong>Sign out</strong> from the same menu when finished.</li></ol>
-    <div class="alert alert-light border mb-0"><strong>Need help?</strong> Contact IT for access, connection or calendar issues and your Admin for project questions. Include the project number, attempted action and displayed message. If a session expires, sign in again. Copy unsaved field changes before leaving the page.</div></section><p class="guide-empty" role="status" hidden>No topics found. Try “milestones” or “permissions”.</p></div>
-    </div>
-<div id="superadminGuideContent" class="guide-layout d-none" data-tracker-guide>
-        <aside class="guide-sidebar">
-            <div><label class="guide-search-label" for="superadminGuideContent-search">Find a topic</label><div class="guide-search-box"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg><input id="superadminGuideContent-search" type="search" data-guide-search placeholder="Search the guide" autocomplete="off"></div></div>
-            <nav class="guide-topics" aria-label="Guide topics"><button type="button" class="guide-topic-button" aria-controls="superadminGuideContent-topic-1" aria-current="true"><span class="guide-topic-number">01</span><span>Manage accounts</span></button><button type="button" class="guide-topic-button" aria-controls="superadminGuideContent-topic-2" aria-current="false"><span class="guide-topic-number">02</span><span>Staff permissions</span></button><button type="button" class="guide-topic-button" aria-controls="superadminGuideContent-topic-3" aria-current="false"><span class="guide-topic-number">03</span><span>Working days &amp; holidays</span></button><button type="button" class="guide-topic-button" aria-controls="superadminGuideContent-topic-4" aria-current="false"><span class="guide-topic-number">04</span><span>Profile &amp; sign out</span></button></nav>
-            <label class="guide-mobile-topics" for="superadminGuideContent-select">Choose a topic<select id="superadminGuideContent-select" class="form-select" data-guide-select><option value="superadminGuideContent-topic-1">01 · Manage accounts</option><option value="superadminGuideContent-topic-2">02 · Staff permissions</option><option value="superadminGuideContent-topic-3">03 · Working days &amp; holidays</option><option value="superadminGuideContent-topic-4">04 · Profile &amp; sign out</option></select></label>
-        </aside>
-        <div class="guide-reading-pane"><p class="guide-intro">Use Superadmin to manage accounts, Staff permissions and the shared working-day calendar. You can also manage your profile.</p><section id="superadminGuideContent-topic-1" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="superadminGuideContent-topic-1-title"><span class="guide-topic-kicker">Account administration</span><h2 id="superadminGuideContent-topic-1-title">Create and manage accounts</h2><ol><li>Open <strong>Accounts → Create account</strong>. Enter the person’s name, username, password and role, then save.</li><li>Staff cannot create their own accounts. Employees contact the IT department (Superadmin), which creates their accounts and assigns the appropriate role and permissions. Only active accounts can sign in.</li><li>Use <strong>Edit</strong> to update account details. Use <strong>Delete</strong> to remove an account that is no longer needed.</li><li>The original Superadmin account is protected and cannot be deleted, even if its name or role changes. You also cannot delete your signed-in account. Keep at least one active Superadmin account.</li></ol></section><section id="superadminGuideContent-topic-2" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="superadminGuideContent-topic-2-title" hidden><span class="guide-topic-kicker">Control access</span><h2 id="superadminGuideContent-topic-2-title">Assign Staff permissions</h2><p>Use the Staff account’s <strong>Permissions</strong> menu to enable the actions that person needs, such as adding or editing projects, import, export, deletion, restoring historical alerts and archiving. These controls apply to Staff accounts. Review the saved settings after making changes.</p></section><section id="superadminGuideContent-topic-3" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="superadminGuideContent-topic-3-title" hidden><span class="guide-topic-kicker">Shared calendar</span><h2 id="superadminGuideContent-topic-3-title">Manage working days and Philippine holidays</h2><ol><li>Under <strong>Accounts → Philippine holidays</strong>, select non-working weekdays and choose whether holidays are excluded. Saturdays and Sundays are excluded by default. Keep at least one working weekday and save the settings.</li><li>Add a holiday by its name and date, or use an individual holiday’s action to include or exclude that date. Restore a date to return it to the source calendar.</li><li>These shared settings affect milestone durations, work-hour calculations, calculated deadlines and selectable project dates. A calculated deadline on a non-working day moves to the next working day.</li><li>Enable <strong>Automatic updates</strong> and save. Official announcements are checked daily from <strong>03:00 Philippine time</strong>, with retries after failures. Use <strong>Sync now</strong> for an immediate check or <strong>Refresh</strong> to reload the panel. Review the last successful sync and any error; the saved calendar remains available if a sync fails.</li></ol></section><section id="superadminGuideContent-topic-4" class="guide-topic" data-guide-topic tabindex="-1" aria-labelledby="superadminGuideContent-topic-4-title" hidden><span class="guide-topic-kicker">Your account</span><h2 id="superadminGuideContent-topic-4-title">Update your profile and sign out</h2><p>Your account allows one active browser session. A successful login on another browser or device signs out the previous session. Multiple tabs in the same browser are allowed. <strong>Superadmin is exempt from the 30-minute inactivity logout.</strong> The eight-hour maximum session duration still applies. Sign out when finished.</p><p>Open your top-right avatar and choose <strong>Edit profile</strong> to update your display name or photo. Use a JPG, PNG or WebP up to 3 MB, position the photo and save. Choose <strong>Sign out</strong> from the same menu when finished.</p></section><p class="guide-empty" role="status" hidden>No topics found. Try “milestones” or “permissions”.</p></div>
-    </div>
+@include('tracker-staff-guide')
+@include('tracker-admin-guide')
+@include('tracker-superadmin-guide')
                 </div>
-
-                <div class="modal-footer"><span id="guideTopicProgress" class="guide-footer-note" role="status">Topic 1 of 12</span><div class="guide-footer-actions"><button id="guidePreviousButton" type="button" class="btn btn-outline-secondary" disabled>Previous</button><button id="guideNextButton" type="button" class="btn btn-outline-secondary">Next topic</button><button type="button" class="btn btn-primary" data-bs-dismiss="modal">Done</button></div></div>
+                <div class="modal-footer"><p class="guide-footnote">Close this guide to use the main-page buttons.</p><button type="button" class="btn guide-close" data-bs-dismiss="modal">Close guide</button></div>
             </div>
         </div>
     </div>
@@ -2970,34 +2905,36 @@ ADD / EDIT PROJECT
         <div><strong>Your session is about to end</strong><p>You will be signed out in <span id="sessionIdleCountdown">60</span> seconds because of inactivity. Your project draft will stay in this tab.</p></div>
         <button type="button" class="btn btn-primary btn-sm" onclick="keepTrackerSessionActive()">Stay signed in</button>
     </div>
-    <script src="js/auth.js?v=20261013-status-dropdown"></script>
-    <script src="js/session.js?v=20261011-account-sessions"></script>
+    @include('deletion-requests')
+    <script src="js/deletion-requests.js?v=20261030-history-passwords"></script>
+    <script src="js/auth.js?v=20261030-core-defects"></script>
+    <script src="js/session.js?v=20261030-core-defects"></script>
 
-    <script src="js/admin.js?v=20261011-cloud"></script>
+    <script src="js/admin.js?v=20261030-core-defects"></script>
 
-    <script src="js/db.js?v=20261011-account-sessions"></script>
+    <script src="js/db.js?v=20261029-deletion-approval"></script>
 
     <script src="js/state.js?v=20261006-notification-navigation"></script>
 
     <script>window.projectHolidayCalendar = @json(\App\Support\TrackerHolidays::calendar());</script>
     <script src="js/utils.js?v=20261007-block-dates"></script>
 
-    <script src="js/history.js?v=20261013-status-dropdown"></script>
+    <script src="js/history.js?v=20261010-history-actor"></script>
 
     <script src="js/timeline.js?v=20261010-date-only-alerts"></script>
 
-    <script src="js/projects.js?v=20261013-status-dropdown"></script>
+    <script src="js/projects.js?v=20261030-core-defects"></script>
     <script src="js/project-presence.js?v=20261011-account-sessions"></script>
-    <script src="js/guide.js?v=20261010-guide-cleanup"></script>
+    <script src="js/guide.js?v=20261030-role-guides"></script>
 
     <script src="js/workspace.js?v=20261010-date-only-alerts"></script>
 
-    <script src="js/excel.js?v=20261013-status-dropdown"></script>
+    <script src="js/excel.js?v=20261030-core-defects"></script>
 
     <script src="js/holidays.js?v=20261007-block-dates"></script>
     <script src="js/workday-picker.js?v=20261007-block-dates"></script>
-    <script src="js/app.js?v=20261013-status-dropdown"></script>
-
+    <script src="js/app.js?v=20261006-integrity-audit"></script>
+    
 
 
 </body>

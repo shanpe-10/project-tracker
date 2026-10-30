@@ -16,7 +16,10 @@ final class TrackerSession
     {
         DB::transaction(function () use ($request, $account) {
             // Serialize simultaneous logins for this account: the latest one wins.
-            User::whereKey($account->id)->lockForUpdate()->firstOrFail();
+            $fresh = User::whereKey($account->id)->lockForUpdate()->firstOrFail();
+            if (!$fresh->active || !hash_equals($fresh->password_hash,$account->password_hash)) {
+                throw \Illuminate\Validation\ValidationException::withMessages(['password'=>'Your account password or access changed. Please sign in again.']);
+            }
             $token = Str::random(64);
             $now = now()->getTimestamp();
             DB::table('tracker_account_sessions')->updateOrInsert(['user_id' => $account->id], [

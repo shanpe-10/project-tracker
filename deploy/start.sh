@@ -17,7 +17,7 @@ mkdir -p storage/framework/cache/data storage/framework/sessions storage/framewo
 chown -R www-data:www-data storage bootstrap/cache
 php artisan config:cache
 php artisan migrate --force --no-interaction
-php artisan tracker:bootstrap-pilot --no-interaction
+php artisan tracker:bootstrap-cloud --no-interaction
 php artisan view:cache
 # Catch up date-driven statuses after a free-instance sleep, before serving users.
 php artisan tracker:project-status-sync --no-interaction

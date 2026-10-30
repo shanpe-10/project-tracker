@@ -23,18 +23,5 @@ Homestead.json
 Homestead.yaml
 Thumbs.db
 
-# Pilot secrets and runtime files
-.env.*
-!.env.example
-!.env.render.example
-*secrets*.php
-*.sqlite
-*.sqlite3
-*.db
-*.sql.gz
-*.dump
-/backups/
-/storage/app/*
-/storage/backups/
-/vendor/
-/node_modules/
+/test-media
+/private

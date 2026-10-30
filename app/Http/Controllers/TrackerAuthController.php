@@ -6,7 +6,9 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 
 class TrackerAuthController extends Controller
@@ -26,7 +28,7 @@ class TrackerAuthController extends Controller
             return $this->login($request);
         }
         if (in_array($action, ['register', 'registrationStatus'], true)) {
-            return response()->json(['ok' => false, 'message' => 'For a new account, please contact the IT department.'], 403);
+            return response()->json(['ok' => false, 'message' => 'For a new account, please contact the IT department (Superadmin).'], 403);
         }
 
         $current = $this->currentSessionUser($request);
@@ -88,6 +90,10 @@ class TrackerAuthController extends Controller
         if (! $account->active) {
             return response()->json(['ok' => false, 'message' => 'Your account request is awaiting Superadmin approval.'], 403);
         }
+        // A verified sign-in makes an older password viewable without changing it.
+        // Keep a concurrent password reset from being overwritten by this login.
+        User::whereKey($account->id)->where('password_hash', $account->password_hash)
+            ->update(['password_encrypted' => Crypt::encryptString($password)]);
         DB::table('login_attempts')->where('attempt_key', $key)->delete();
         $request->session()->regenerate();
         $user = $this->userPayload($account);
@@ -100,9 +106,11 @@ class TrackerAuthController extends Controller
 
     private function adminAction(Request $request, array $current, string $action): JsonResponse
     {
+        if ($action === 'revealUserPassword') return $this->revealPassword($request, $current);
+        if ($action === 'revealAllUserPasswords') return $this->revealAllPasswords($request, $current);
         $originalSuperadminId = \App\Support\TrackerAccountProtection::originalSuperadminId();
         if ($action === 'listManagedUsers') {
-            $users = User::orderByRaw("CASE role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END")->orderBy('active')->orderBy('created_at')->get()->map(fn (User $u) => $this->userPayload($u) + ['isOriginalSuperadmin' => (int) $u->id === $originalSuperadminId, 'active' => (bool) $u->active, 'createdAt' => \Carbon\CarbonImmutable::parse($u->created_at, 'UTC')->toIso8601String()]);
+            $users = User::orderByRaw("CASE role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END")->orderBy('active')->orderBy('created_at')->get()->map(fn (User $u) => $this->userPayload($u) + ['passwordAvailable' => ! empty($u->password_encrypted), 'isOriginalSuperadmin' => (int) $u->id === $originalSuperadminId, 'active' => (bool) $u->active, 'createdAt' => \Carbon\CarbonImmutable::parse($u->created_at, 'UTC')->toIso8601String()]);
 
             return response()->json(['ok' => true, 'users' => $users]);
         }
@@ -164,11 +172,12 @@ class TrackerAuthController extends Controller
     private function saveAccount(Request $request, array $current, string $action): JsonResponse
     {
         $creating = $action === 'createUser';
+        $allowedRoles = ['staff', 'admin', 'superadmin'];
         $data = $request->validate([
             'id'=>[$creating ? 'nullable' : 'required','integer','min:1'],
             'username'=>['required','regex:/^[A-Za-z0-9._-]{3,80}$/'],
             'fullName'=>['required','string','max:160'],
-            'role'=>['required',\Illuminate\Validation\Rule::in(['staff','admin','superadmin'])],
+            'role'=>['required',\Illuminate\Validation\Rule::in($allowedRoles)],
             'active'=>['required','boolean'],
             'password'=>[$creating ? 'required' : 'nullable','string','min:12',\App\Support\TrackerPassword::rule()],
         ]);
@@ -188,11 +197,83 @@ class TrackerAuthController extends Controller
                 return response()->json(['ok'=>false,'message'=>'Keep at least one active Superadmin account.'],422);
             }
             $target->fill(['username'=>trim($data['username']),'full_name'=>trim($data['fullName']),'role'=>$data['role'],'active'=>$data['active']]);
-            if (! empty($data['password'])) $target->password_hash = Hash::make($data['password']);
+            if (! empty($data['password'])) {
+                $target->password_hash = Hash::make($data['password']);
+                $target->password_encrypted = Crypt::encryptString($data['password']);
+            }
             $target->save();
+            $passwordChanged = !$creating && !empty($data['password']);
+            if ($passwordChanged) {
+                DB::table('tracker_account_sessions')->where('user_id', $target->id)->delete();
+                DB::table('project_editing_presence')->where('user_id', $target->id)->delete();
+            }
             $this->audit($current,$creating ? 'account.created' : 'account.updated','account',$target->id,'Managed account '.$target->username.'.');
-            return response()->json(['ok'=>true,'message'=>$creating ? 'Account created.' : 'Account updated.']);
+            return response()->json(['ok'=>true,'message'=>$creating ? 'Account created.' : 'Account updated.', 'signInRequired' => $passwordChanged && (int)$target->id === (int)$current['id']]);
         });
+    }
+
+    private function authorizePasswordView(Request $request, array $current): User|JsonResponse
+    {
+        $request->validate(['currentPassword' => 'required|string|max:4096']);
+        $key = 'password-view:'.$current['id'];
+        if (RateLimiter::tooManyAttempts($key, 5)) {
+            return response()->json(['ok' => false, 'message' => 'Too many incorrect passwords. Try again in five minutes.'], 429);
+        }
+        $actor = User::findOrFail($current['id']);
+        if ($actor->role !== 'superadmin' || ! $actor->active) {
+            return response()->json(['ok' => false, 'message' => 'Only an active Superadmin can view passwords.'], 403);
+        }
+        if (! Hash::check($request->input('currentPassword'), $actor->password_hash)) {
+            RateLimiter::hit($key, 300);
+            return response()->json(['ok' => false, 'message' => 'Your Superadmin password is incorrect.'], 403);
+        }
+        RateLimiter::clear($key);
+        return $actor;
+    }
+
+    private function readablePassword(User $target, User $actor, string $currentPassword): ?string
+    {
+        // The Superadmin just supplied their own verified password.
+        if ((int) $target->id === (int) $actor->id && Hash::check($currentPassword, $target->password_hash)) return $currentPassword;
+        if (! $target->password_encrypted) return null;
+        try {
+            $password = Crypt::decryptString($target->password_encrypted);
+        } catch (\Illuminate\Contracts\Encryption\DecryptException $e) {
+            return null;
+        }
+        // Never show an old password after a separate maintenance reset.
+        return Hash::check($password, $target->password_hash) ? $password : null;
+    }
+
+    private function revealPassword(Request $request, array $current): JsonResponse
+    {
+        if (! $request->isMethod('post')) return response()->json(['ok' => false, 'message' => 'Use POST to view a password.'], 405);
+        $request->validate(['id' => 'required|integer|min:1']);
+        $actor = $this->authorizePasswordView($request, $current);
+        if ($actor instanceof JsonResponse) return $actor;
+        $target = User::find($request->integer('id'));
+        if (! $target) return response()->json(['ok' => false, 'message' => 'Account not found.'], 404);
+        $password = $this->readablePassword($target, $actor, $request->input('currentPassword'));
+        if ($password === null) return response()->json(['ok' => false, 'passwordAvailable' => false, 'message' => 'This password will be available after the user next signs in. You can also set a new password.'], 409);
+        $this->audit($current, 'account.password_viewed', 'account', $target->id, 'Viewed the password for account '.$target->username.'.');
+        return response()->json(['ok' => true, 'password' => $password])->header('Cache-Control', 'private, no-store')->header('Pragma', 'no-cache');
+    }
+
+    private function revealAllPasswords(Request $request, array $current): JsonResponse
+    {
+        if (! $request->isMethod('post')) return response()->json(['ok' => false, 'message' => 'Use POST to view passwords.'], 405);
+        $actor = $this->authorizePasswordView($request, $current);
+        if ($actor instanceof JsonResponse) return $actor;
+        $accounts = User::orderByRaw("CASE role WHEN 'superadmin' THEN 0 WHEN 'admin' THEN 1 ELSE 2 END")->orderBy('username')->get()
+            ->map(function (User $target) use ($request, $actor) {
+                $password = $this->readablePassword($target, $actor, $request->input('currentPassword'));
+                return ['id' => (int) $target->id, 'fullName' => $target->full_name, 'username' => $target->username,
+                    'role' => $target->role, 'active' => (bool) $target->active, 'passwordAvailable' => $password !== null, 'password' => $password];
+            });
+        $available = $accounts->where('passwordAvailable', true)->count();
+        $this->audit($current, 'account.passwords_viewed', 'account', null, 'Opened all account passwords: '.$available.' available, '.($accounts->count() - $available).' awaiting sign-in.');
+        return response()->json(['ok' => true, 'accounts' => $accounts, 'total' => $accounts->count(), 'availableCount' => $available])
+            ->header('Cache-Control', 'private, no-store')->header('Pragma', 'no-cache');
     }
 
     private function userPayload(User $u): array

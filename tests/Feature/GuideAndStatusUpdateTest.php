@@ -53,7 +53,7 @@ class GuideAndStatusUpdateTest extends TestCase
 
     private function postApi(string $endpoint, array $body)
     {
-        return $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token', 'guide-token')->postJson('/api/'.$endpoint, $body);
+        return $this->withSession($this->session)->withHeader('X-CSRF-Token', 'guide-token')->postJson('/api/'.$endpoint, $body);
     }
 
     public function test_final_inspection_sets_pending_without_prior_milestones_or_an_elapsed_contract(): void
@@ -82,7 +82,7 @@ class GuideAndStatusUpdateTest extends TestCase
             'contractRef' => '2026-10-05', 'contractDuration' => 100, 'finalInspection' => '2026-10-09', 'status' => 'Pre-inspection'];
         $record = $this->postApi('data.php', ['action' => 'saveProject', 'record' => $data])->assertOk()->assertJsonPath('record.status', 'Pending')->json('record');
         $this->assertSame('Pending', DB::table('projects')->where('id', $record['id'])->value('project_status'));
-        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=listProjects&status=Pending')->assertOk()->assertJsonPath('totalRecords', 1);
+        $this->withSession($this->session)->getJson('/api/data.php?action=listProjects&status=Pending')->assertOk()->assertJsonPath('totalRecords', 1);
         $record['finalInspection'] = '';
         $record = $this->postApi('project-edit.php', ['projectId' => $record['id'], 'record' => json_encode($record), 'deleteIds' => '[]'])->assertOk()->assertJsonPath('record.status', 'Pre-inspection')->json('record');
         $record['finalInspection'] = '2026-10-09';
@@ -93,7 +93,7 @@ class GuideAndStatusUpdateTest extends TestCase
     {
         foreach ([1, 3] as $id) {
             $this->asUser($id);
-            $this->withTrackerSession($this->session)->getJson('/api/chat.php')->assertNotFound();
+            $this->withSession($this->session)->getJson('/api/chat.php')->assertNotFound();
             $this->postApi('chat.php', ['action' => 'send', 'body' => 'Removed feature'])->assertNotFound();
         }
         $this->assertFileDoesNotExist(public_path('js/chat.js'));
@@ -109,10 +109,10 @@ class GuideAndStatusUpdateTest extends TestCase
         file_put_contents($this->photoDirectory.'/fixture.png', base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aPz8AAAAASUVORK5CYII='));
         config(['tracker.profile_photos' => $this->photoDirectory]);
         DB::table('users')->whereIn('id', [1, 2])->update(['profile_photo' => 'fixture.png']);
-        $this->withTrackerSession($this->session)->get('/api/profile.php')->assertOk();
-        $this->withTrackerSession($this->session)->getJson('/api/profile.php?userId=2')->assertForbidden();
+        $this->withSession($this->session)->get('/api/profile.php')->assertOk();
+        $this->withSession($this->session)->getJson('/api/profile.php?userId=2')->assertForbidden();
         $this->asUser(3);
-        $this->withTrackerSession($this->session)->get('/api/profile.php?userId=2')->assertOk();
+        $this->withSession($this->session)->get('/api/profile.php?userId=2')->assertOk();
     }
 
     public function test_retirement_archives_messages_before_removing_the_chat_tables(): void

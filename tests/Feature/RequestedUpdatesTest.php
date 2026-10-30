@@ -15,6 +15,7 @@ class RequestedUpdatesTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        $this->useWeekdayCalendarFixture();
         if (DB::connection()->getDriverName() !== 'pgsql') $this->markTestSkipped('PostgreSQL integration test.');
         if (!str_ends_with(DB::connection()->getDatabaseName(), '_test')) throw new \RuntimeException('Dedicated test database required.');
         $this->schema = 'requested_'.bin2hex(random_bytes(6));
@@ -46,7 +47,7 @@ class RequestedUpdatesTest extends TestCase
 
     private function api(array $body,string $endpoint='data.php')
     {
-        return $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','request-token')->postJson('/api/'.$endpoint,$body);
+        $response = $this->withSession($this->session)->withHeader('X-CSRF-Token','request-token')->postJson('/api/'.$endpoint,$body); return $this->finishImportFixture($response,$body,$endpoint);
     }
 
     private function project(array $data=[]): array
@@ -58,12 +59,12 @@ class RequestedUpdatesTest extends TestCase
 
     public function test_dates_use_calendar_months_and_contract_date_with_decimal_days(): void
     {
-        foreach (['2026-01-31'=>'2026-02-28','2024-01-31'=>'2024-02-29','2026-12-31'=>'2027-01-31'] as $start=>$due) {
+        foreach (['2026-01-31'=>'2026-03-02','2024-01-31'=>'2024-02-29','2026-12-31'=>'2027-02-01'] as $start=>$due) {
             $dates=TrackerMilestones::dueDates(['biddingDate'=>$start]);
             foreach (['preInspectionDueDate','ntpDueDate','materialTestingDueDate'] as $key) $this->assertSame($due,$dates[$key]);
         }
         $dates=TrackerMilestones::dueDates(['contractRef'=>'2026-10-01','ntpDate'=>'2026-10-20','contractDuration'=>30.5,'contractEndDate'=>'2028-01-01','ldNewCompletionDate'=>'2029-01-01']);
-        $this->assertSame('2026-10-31',$dates['contractDueDate']);
+        $this->assertSame('2026-11-12',$dates['contractDueDate']);
         $this->assertSame($dates['contractDueDate'],$dates['finalInspectionDueDate']);
         foreach (['60 CD','days',true,[],0,-1,'INF','NaN',40000] as $value) $this->assertNull(TrackerMilestones::duration($value));
         foreach ([30,30.5,'30.5','3e1'] as $value) $this->assertNotNull(TrackerMilestones::duration($value));
@@ -73,10 +74,10 @@ class RequestedUpdatesTest extends TestCase
     {
         $record=['status'=>'Pending','contractRef'=>'2026-10-01','contractDuration'=>30];
         $types=fn ($day,$extra=[])=>array_column(TrackerMilestones::alerts(array_replace($record,$extra),[],new \DateTimeImmutable($day)),'type');
-        $this->assertNotContains('final-inspection',$types('2026-10-23'));
-        $this->assertContains('final-inspection',$types('2026-10-24'));
-        $this->assertContains('final-inspection',$types('2026-10-31'));
-        $this->assertContains('final-inspection-overdue',$types('2026-11-01'));
+        $this->assertNotContains('final-inspection',$types('2026-11-02'));
+        $this->assertContains('final-inspection',$types('2026-11-03'));
+        $this->assertContains('final-inspection',$types('2026-11-12'));
+        $this->assertContains('final-inspection-overdue',$types('2026-11-13'));
         $this->assertNotContains('final-inspection',$types('2026-10-24',['finalInspection'=>'2026-10-24']));
     }
 
@@ -84,9 +85,9 @@ class RequestedUpdatesTest extends TestCase
     {
         $record=['status'=>'Pending','contractRef'=>'2026-10-01','contractDuration'=>30];
         $types=fn ($day)=>array_column(TrackerMilestones::alerts($record,['finalInspection'=>14],new \DateTimeImmutable($day)),'type');
-        $this->assertNotContains('final-inspection',$types('2026-10-16'));
-        $this->assertContains('final-inspection',$types('2026-10-17'));
-        $this->assertContains('final-inspection-overdue',$types('2026-11-01'));
+        $this->assertNotContains('final-inspection',$types('2026-10-22'));
+        $this->assertContains('final-inspection',$types('2026-10-23'));
+        $this->assertContains('final-inspection-overdue',$types('2026-11-13'));
     }
 
     public function test_numeric_duration_is_enforced_in_edit_import_and_saved_contract_date(): void
@@ -94,19 +95,19 @@ class RequestedUpdatesTest extends TestCase
         $record=$this->project(['contractRef'=>'2026-10-01']);
         foreach (['30 days',true,[],0,-3] as $duration) $this->api(['action'=>'saveProject','record'=>array_replace($record,['contractDuration'=>$duration])])->assertStatus(422);
         $this->api(['action'=>'bulkSaveProjects','batchId'=>'numeric_contract_test','records'=>[['title'=>'Invalid import','contractDuration'=>'60CD']]])->assertStatus(422);
-        $this->api(['action'=>'saveProject','record'=>array_replace($record,['contractDuration'=>30.5,'ntpDate'=>'2026-10-10'])])->assertOk()->assertJsonPath('record.contractEndDate','2026-10-31')->assertJsonPath('record.contractDuration',30.5);
+        $this->api(['action'=>'saveProject','record'=>array_replace($record,['contractDuration'=>30.5,'ntpDate'=>'2026-10-12'])])->assertOk()->assertJsonPath('record.contractEndDate','2026-11-12')->assertJsonPath('record.contractDuration',30.5);
         $this->api(['action'=>'bulkSaveProjects','batchId'=>'numeric_contract_valid','records'=>[['title'=>'Decimal import','contractDuration'=>2.5,'contractRef'=>'2026-10-01']]])->assertOk();
         $data=json_decode(DB::table('projects')->where('title','Decimal import')->value('data'),true);
-        $this->assertSame('2026-10-03',$data['contractEndDate']);
+        $this->assertSame('2026-10-05',$data['contractEndDate']);
     }
 
     public function test_noa_and_ntp_dates_resolve_all_aliases_and_remain_visible(): void
     {
         $project=$this->project(['noa'=>'2025-02-01','ntpDate'=>'2025-02-02']);
-        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=projectAlerts&projectId='.$project['id'])->assertOk()
+        $this->withSession($this->session)->getJson('/api/data.php?action=projectAlerts&projectId='.$project['id'])->assertOk()
             ->assertJsonFragment(['label'=>'Notice of Award','status'=>'Resolved','doneDate'=>'2025-02-01'])
             ->assertJsonFragment(['label'=>'Notice to Proceed','status'=>'Resolved','doneDate'=>'2025-02-02']);
-        $notifications=$this->withTrackerSession($this->session)->getJson('/api/data.php?action=notifications')->assertOk()->json();
+        $notifications=$this->withSession($this->session)->getJson('/api/data.php?action=notifications')->assertOk()->json();
         $types=array_column($notifications['groups'][0]['alerts'],'type');
         $this->assertFalse((bool)array_filter($types,fn ($type)=>str_starts_with($type,'noa') || str_starts_with($type,'ntp')));
         $this->assertSame('2025-02-01',json_decode(DB::table('projects')->value('data'),true)['noa']);
@@ -116,14 +117,14 @@ class RequestedUpdatesTest extends TestCase
     public function test_dashboard_paginates_projects_without_splitting_alerts_and_notifications_are_unfiltered(): void
     {
         for ($i=1;$i<=12;$i++) $this->project(['projectNo'=>(string)$i,'title'=>'Alert project '.$i]);
-        $page=$this->withTrackerSession($this->session)->getJson('/api/data.php?action=dashboard&alertPageSize=10')->assertOk()->json();
+        $page=$this->withSession($this->session)->getJson('/api/data.php?action=dashboard&alertPageSize=10')->assertOk()->json();
         $this->assertCount(10,$page['alertGroups']);
         $this->assertCount(30,$page['alerts']);
         $this->assertSame(12,$page['alertProjectTotal']);
         $this->assertSame(2,$page['alertTotalPages']);
-        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=dashboard&alertSearch=no-such-alert')->assertOk()->assertJsonCount(0,'alerts');
-        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=notifications')->assertOk()->assertJsonCount(12,'groups')->assertJsonPath('alertTotal',36);
-        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=dashboard&alertPageSize=10&alertPage=2')->assertOk()->assertJsonCount(2,'alertGroups')->assertJsonCount(6,'alerts');
+        $this->withSession($this->session)->getJson('/api/data.php?action=dashboard&alertSearch=no-such-alert')->assertOk()->assertJsonCount(0,'alerts');
+        $this->withSession($this->session)->getJson('/api/data.php?action=notifications')->assertOk()->assertJsonCount(12,'groups')->assertJsonPath('alertTotal',36);
+        $this->withSession($this->session)->getJson('/api/data.php?action=dashboard&alertPageSize=10&alertPage=2')->assertOk()->assertJsonCount(2,'alertGroups')->assertJsonCount(6,'alerts');
     }
 
     public function test_filters_combine_and_clearing_parameters_restores_all_records(): void
@@ -132,10 +133,10 @@ class RequestedUpdatesTest extends TestCase
         $this->project(['projectNo'=>'2','title'=>'Road Brgy 2','status'=>'Completed','biddingDate'=>'2026-02-10','completion'=>'2026-03-01']);
         $this->project(['projectNo'=>'3','title'=>'Archived Road','archivedAt'=>'2026-01-01']);
         DB::table('projects')->where('project_no','3')->update(['archived_at'=>'2026-01-01']);
-        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=all&status=Pending&brgy=1&dateField=biddingDate&month=1&year=2026')->assertOk()->assertJsonPath('totalRecords',1);
-        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=all&status=Completed')->assertOk()->assertJsonPath('totalRecords',1);
-        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=all')->assertOk()->assertJsonPath('totalRecords',2);
-        $this->withTrackerSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=archived')->assertOk()->assertJsonPath('totalRecords',1);
+        $this->withSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=all&status=Pending&brgy=1&dateField=biddingDate&month=1&year=2026')->assertOk()->assertJsonPath('totalRecords',1);
+        $this->withSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=all&status=Completed')->assertOk()->assertJsonPath('totalRecords',1);
+        $this->withSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=all')->assertOk()->assertJsonPath('totalRecords',2);
+        $this->withSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=archived')->assertOk()->assertJsonPath('totalRecords',1);
     }
 
     private function asDefaultAdmin(): void
@@ -155,20 +156,21 @@ class RequestedUpdatesTest extends TestCase
         $user=$this->api(['action'=>'session'],'auth.php')->assertOk()->json('user');
         foreach (['canCreate','canEdit','canImport','canExport','canDelete','canDeleteAll','canResolveAlerts','canArchive'] as $permission) $this->assertTrue($user[$permission], $permission);
         $record=$this->api(['action'=>'saveProject','record'=>array_replace($record,['title'=>'Admin project edit'])])->assertOk()->assertJsonPath('record.title','Admin project edit')->json('record');
-        $record=$this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','request-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode(array_replace($record,['title'=>'Admin form edit']))])->assertOk()->assertJsonPath('record.title','Admin form edit')->json('record');
-        $created=$this->api(['action'=>'saveProject','record'=>['title'=>'Admin created project','biddingDate'=>'2026-01-31','approvedBudget'=>'100','winningBidder'=>'Demo builder']])->assertOk()->json('record');
+        $record=$this->withSession($this->session)->withHeader('X-CSRF-Token','request-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode(array_replace($record,['title'=>'Admin form edit']))])->assertOk()->assertJsonPath('record.title','Admin form edit')->json('record');
+        $created=$this->api(['action'=>'saveProject','record'=>['title'=>'Admin created project','biddingDate'=>'2026-01-30','approvedBudget'=>'100','winningBidder'=>'Demo builder']])->assertOk()->json('record');
         $this->api(['action'=>'setProjectArchived','id'=>$created['id'],'archived'=>true])->assertOk();
         $this->assertNotNull(DB::table('projects')->where('id',$created['id'])->value('archived_at'));
         $this->api(['action'=>'setProjectArchived','id'=>$created['id'],'archived'=>false])->assertOk();
         $this->assertNull(DB::table('projects')->where('id',$created['id'])->value('archived_at'));
-        $csv=$this->withTrackerSession($this->session)->get('/api/data.php?action=listProjects&format=csv')->assertOk()->streamedContent();
+        $csv=$this->withSession($this->session)->get('/api/data.php?action=listProjects&format=csv')->assertOk()->streamedContent();
         $this->assertStringContainsString('Admin created project',$csv);
-        $this->withTrackerSession($this->session)->get('/api/data.php?action=listProjects&format=xlsx')->assertOk();
+        $this->withSession($this->session)->get('/api/data.php?action=listProjects&format=xlsx')->assertOk();
         $this->api(['action'=>'bulkSaveProjects','batchId'=>'requested_admin_import','records'=>[['title'=>'Admin imported project']]])->assertOk()->assertJsonPath('count',1);
         $this->assertSame(1,DB::table('projects')->where('title','Admin imported project')->count());
-        $this->api(['action'=>'rollbackImport','batchId'=>'requested_admin_import'])->assertOk()->assertJsonPath('count',1);
+        $this->api(['action'=>'rollbackImport','batchId'=>'requested_admin_import'])->assertStatus(422);
+        $this->assertSame(1,DB::table('projects')->where('title','Admin imported project')->count());
         $this->api(['action'=>'listAuditLog'],'auth.php')->assertOk();
-        $this->withTrackerSession($this->session)->getJson('/api/backups.php')->assertOk();
+        $this->withSession($this->session)->getJson('/api/backups.php')->assertOk();
         $this->api(['action'=>'saveTimelineSettings','settings'=>['noa'=>10,'ntp'=>30,'material'=>15,'completion'=>15,'finalInspection'=>30,'bidding'=>15]])->assertOk()->assertJsonPath('settings.finalInspection',30);
         $this->api(['action'=>'saveTimelineRecord','record'=>array_replace($record,['timelineAlertsCompleted'=>['noa-overdue']]),'history'=>['projectId'=>$record['id'],'action'=>'timeline-mark-done','details'=>'Resolved']])->assertUnprocessable();
     }
@@ -178,10 +180,11 @@ class RequestedUpdatesTest extends TestCase
         config(['tracker.attachments'=>storage_path('framework/testing/admin-access-'.bin2hex(random_bytes(8)))]);
         $record=$this->project();
         $this->asDefaultAdmin();
-        $this->api(['action'=>'deleteProject','id'=>$record['id']])->assertOk();
+        $this->withSession($this->session)->withHeader('X-CSRF-Token','request-token');
+        $this->confirmDirectFixture(['targetType'=>'project','id'=>$record['id']])->assertOk();
         $this->assertSame(0,DB::table('projects')->count());
         $this->project(['projectNo'=>'124']);
-        $this->api(['action'=>'clearStore','store'=>'projects'])->assertOk();
+        $this->confirmDirectFixture(['targetType'=>'project','all'=>true])->assertOk();
         $this->assertSame(0,DB::table('projects')->count());
         $this->assertSame(1,(int)DB::table('project_number_sequences')->where('sequence_name','projects')->value('next_number'));
     }
@@ -201,7 +204,7 @@ class RequestedUpdatesTest extends TestCase
         $this->assertNull(DB::table('users')->where('id',$id)->first());
         $this->api(['action'=>'listAuditLog'],'auth.php')->assertForbidden();
         $this->api(['action'=>'saveTimelineSettings','settings'=>[]])->assertForbidden();
-        $this->withTrackerSession($this->session)->getJson('/api/backups.php')->assertForbidden();
+        $this->withSession($this->session)->getJson('/api/backups.php')->assertForbidden();
     }
 
     public function test_superadmin_is_limited_to_account_management_and_own_profile(): void
@@ -209,12 +212,12 @@ class RequestedUpdatesTest extends TestCase
         $record=$this->project();
         $this->asUser(2);
         foreach (['', '?action=dashboard', '?action=notifications', '?action=listProjects', '?action=listProjects&format=csv', '?action=listProjects&format=xlsx', '?action=projectHistory&projectId='.$record['id'], '?action=projectAlerts&projectId='.$record['id'], '?action=projectVersion', '?action=nextProjectNumber'] as $query) {
-            $this->withTrackerSession($this->session)->getJson('/api/data.php'.$query)->assertForbidden();
+            $this->withSession($this->session)->getJson('/api/data.php'.$query)->assertForbidden();
         }
-        $this->withTrackerSession($this->session)->getJson('/api/attachments.php?projectId='.$record['id'])->assertForbidden();
-        $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','request-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode($record)])->assertForbidden();
+        $this->withSession($this->session)->getJson('/api/attachments.php?projectId='.$record['id'])->assertForbidden();
+        $this->withSession($this->session)->withHeader('X-CSRF-Token','request-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode($record)])->assertForbidden();
         $this->api(['action'=>'listManagedUsers'],'auth.php')->assertOk();
-        $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','request-token')->post('/api/profile.php',['fullName'=>'IT Superadmin'])->assertOk()->assertJsonPath('user.role','superadmin');
+        $this->withSession($this->session)->withHeader('X-CSRF-Token','request-token')->post('/api/profile.php',['fullName'=>'IT Superadmin'])->assertOk()->assertJsonPath('user.role','superadmin');
     }
 
     public function test_revoked_permissions_are_refreshed_and_account_csrf_is_required(): void
@@ -224,7 +227,7 @@ class RequestedUpdatesTest extends TestCase
         $this->api(['action'=>'setUserPermission','id'=>3,'permission'=>'canResolveAlerts','allowed'=>false],'auth.php')->assertOk();
         $this->asUser(3);
         $this->api(['action'=>'saveProject','record'=>array_replace($record,['timelineAlertsCompleted'=>['noa-overdue']])])->assertForbidden();
-        $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','request-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode(array_replace($record,['timelineAlertsCompleted'=>['noa-overdue']]))])->assertForbidden();
+        $this->withSession($this->session)->withHeader('X-CSRF-Token','request-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode(array_replace($record,['timelineAlertsCompleted'=>['noa-overdue']]))])->assertForbidden();
         $this->api(['action'=>'bulkSaveProjects','batchId'=>'manual_flags_import','records'=>[['title'=>'Imported flags','timelineAlertsCompleted'=>['noa-overdue']]]])->assertOk();
         $this->assertArrayNotHasKey('timelineAlertsCompleted',json_decode(DB::table('projects')->where('title','Imported flags')->value('data'),true));
         $this->asUser(2);
@@ -233,6 +236,6 @@ class RequestedUpdatesTest extends TestCase
         $this->asUser(3);
         $this->api(['action'=>'saveProject','record'=>$record])->assertForbidden();
         $this->asUser(2);
-        $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token','wrong')->postJson('/api/auth.php',['action'=>'deleteUser','id'=>3])->assertStatus(419);
+        $this->withSession($this->session)->withHeader('X-CSRF-Token','wrong')->postJson('/api/auth.php',['action'=>'deleteUser','id'=>3])->assertStatus(419);
     }
 }

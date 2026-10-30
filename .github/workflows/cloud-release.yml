@@ -1,0 +1,85 @@
+name: Cloud release checks
+on:
+  push:
+    branches: [laoag-city-ceo-project-tracker]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: tracker_audit_test
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: disposable-ci-password
+        ports: ['5432:5432']
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      DB_CONNECTION: pgsql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_DATABASE: tracker_audit_test
+      DB_USERNAME: postgres
+      DB_PASSWORD: disposable-ci-password
+      PG_DUMP_BINARY: /usr/lib/postgresql/18/bin/pg_dump
+      APP_ENV: testing
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          extensions: pdo_pgsql, mbstring, zip, intl
+          coverage: none
+          tools: composer:v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install PostgreSQL 18 recovery tools
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release; echo $VERSION_CODENAME)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-client-18
+      - name: Install locked dependencies and check advisories
+        run: |
+          mkdir -p bootstrap/cache storage/framework/{cache/data,sessions,views} storage/logs
+          composer install --prefer-dist --no-interaction --no-progress --no-scripts
+          composer audit
+      - name: PostgreSQL and JavaScript regressions
+        run: php scripts/run-release-checks.php
+      - name: Build production image
+        run: docker build -t tracker-cloud:verified .
+      - name: Test fresh container startup and empty database
+        env:
+          PGPASSWORD: disposable-ci-password
+        run: |
+          /usr/lib/postgresql/18/bin/createdb -h 127.0.0.1 -U postgres tracker_container_test
+          docker run -d --name tracker-cloud --network host \
+            -e APP_ENV=production -e APP_DEBUG=false -e APP_KEY=base64:dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHR0dHQ= \
+            -e APP_URL=http://localhost:10000 -e TRACKER_CLOUD=true -e TRACKER_MEDIA_DISK=local \
+            -e SESSION_DRIVER=database -e CACHE_STORE=database -e QUEUE_CONNECTION=sync \
+            -e DB_URL=postgresql://postgres:disposable-ci-password@127.0.0.1:5432/tracker_container_test \
+            -e TRACKER_BOOTSTRAP_NAME='CI Owner' -e TRACKER_BOOTSTRAP_USERNAME=superadmin \
+            -e TRACKER_BOOTSTRAP_PASSWORD=disposable-ci-owner-password tracker-cloud:verified
+          for attempt in $(seq 1 60); do
+            if curl -fsS http://localhost:10000/up >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:10000/up >/dev/null
+          curl -fsS http://localhost:10000/ | grep -q 'Project Tracker'
+          curl -fsS http://localhost:10000/vendor/bootstrap/css/bootstrap.min.css >/dev/null
+          curl -fsS http://localhost:10000/vendor/bootstrap/js/bootstrap.bundle.min.js >/dev/null
+          curl -fsS http://localhost:10000/vendor/xlsx/xlsx.full.min.js >/dev/null
+          curl -fsS -c /tmp/tracker-cookies -H 'Content-Type: application/json' \
+            -d '{"action":"login","username":"superadmin","password":"disposable-ci-owner-password"}' \
+            http://localhost:10000/api/auth.php > /tmp/tracker-login.json
+          php -r '$p=json_decode(file_get_contents("/tmp/tracker-login.json"),true); if (empty($p["ok"])) exit(1);'
+          test "$(/usr/lib/postgresql/18/bin/psql -h 127.0.0.1 -U postgres -d tracker_container_test -Atc 'SELECT count(*) FROM projects')" = 0
+          test "$(/usr/lib/postgresql/18/bin/psql -h 127.0.0.1 -U postgres -d tracker_container_test -Atc 'SELECT count(*) FROM users')" = 1
+      - name: Container logs
+        if: always()
+        run: docker logs tracker-cloud 2>/dev/null || true

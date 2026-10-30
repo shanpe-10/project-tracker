@@ -1,70 +1,43 @@
-/* Searchable handbook. Each role keeps its own topics and reading position. */
+/* One readable guide for the signed-in role, with exact main-page control locations. */
 (() => {
-    const guides = new Map();
-    function activeGuide() {
-        return [...guides.values()].find(guide => !guide.root.classList.contains('d-none'));
-    }
-    function updateFooter(guide) {
-        if (guide !== activeGuide()) return;
-        const index = guide.visible.indexOf(guide.current);
-        const previous = document.getElementById('guidePreviousButton');
-        const next = document.getElementById('guideNextButton');
-        previous.disabled = index <= 0;
-        next.disabled = index < 0 || index >= guide.visible.length - 1;
-        document.getElementById('guideTopicProgress').textContent = index < 0 ? 'No matching topics' : `Topic ${index + 1} of ${guide.visible.length}`;
-    }
-    function select(guide, id, focus = false) {
-        guide.current = guide.visible.includes(id) ? id : guide.visible[0];
-        guide.topics.forEach(topic => {
-            const selected = topic.id === guide.current;
-            topic.panel.hidden = !selected;
-            topic.button.setAttribute('aria-current', String(selected));
-        });
-        guide.select.value = guide.current || '';
-        if (guide.intro) guide.intro.hidden = guide.current !== guide.topics[0]?.id;
-        guide.empty.hidden = Boolean(guide.current);
-        guide.reading.scrollTop = 0;
-        if (focus && guide.current) guide.topics.find(topic => topic.id === guide.current).panel.focus({ preventScroll: true });
-        updateFooter(guide);
-    }
-    function filter(guide) {
-        const words = guide.search.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-        guide.visible = guide.topics.filter(topic => {
-            const matches = words.every(word => topic.text.includes(word));
-            topic.button.hidden = !matches;
-            topic.option.hidden = !matches;
-            topic.option.disabled = !matches;
-            return matches;
-        }).map(topic => topic.id);
-        guide.select.disabled = !guide.visible.length;
-        select(guide, guide.current);
-    }
-    function initialize() {
-        document.querySelectorAll('[data-tracker-guide]').forEach(root => {
-            const guide = { root, search: root.querySelector('[data-guide-search]'), select: root.querySelector('[data-guide-select]'), reading: root.querySelector('.guide-reading-pane'), empty: root.querySelector('.guide-empty'), intro: root.querySelector('.guide-intro'), current: null, visible: [], topics: [] };
-            root.querySelectorAll('[data-guide-topic]').forEach(panel => {
-                const button = root.querySelector(`[aria-controls="${panel.id}"]`);
-                const option = [...guide.select.options].find(item => item.value === panel.id);
-                guide.topics.push({ id: panel.id, panel, button, option, text: `${button.textContent} ${panel.textContent}`.toLowerCase().replace(/\s+/g, ' ') });
-                button.addEventListener('click', () => select(guide, panel.id, true));
+    const titles={staff:'Staff guide',admin:'Admin guide',superadmin:'Superadmin guide'};
+    window.refreshRoleGuide=()=>{
+        const user=window.currentUser,role=user?.role;
+        let active=null;
+        document.querySelectorAll('[data-role-guide]').forEach(guide=>{
+            const selected=guide.dataset.roleGuide===role;
+            guide.hidden=!selected;guide.classList.toggle('d-none',!selected);
+            guide.querySelectorAll('[data-guide-requires],[data-guide-requires-any]').forEach(node=>{
+                const all=(node.dataset.guideRequires||'').split(/\s+/).filter(Boolean);
+                const any=(node.dataset.guideRequiresAny||'').split(/\s+/).filter(Boolean);
+                node.hidden=!all.every(key=>!!user?.[key])||(any.length>0&&!any.some(key=>!!user?.[key]));
             });
-            guides.set(root.id, guide);
-            guide.search.addEventListener('input', () => filter(guide));
-            guide.select.addEventListener('change', () => select(guide, guide.select.value));
-            filter(guide);
+            if(selected)active=guide;
         });
-        document.getElementById('systemGuideModal')?.addEventListener('show.bs.modal', () => {
-            const guide = activeGuide();
-            if (guide) updateFooter(guide);
+        const title=titles[role]||'Your guide';
+        for(const id of ['systemGuideTitle','systemGuideNavigationLabel']){const node=document.getElementById(id);if(node)node.textContent=title;}
+        const description=document.getElementById('guideDescription');
+        if(description)description.textContent=active?.dataset.guideDescription||'Find the controls you need on the main page.';
+        return active;
+    };
+    document.addEventListener('DOMContentLoaded',()=>{
+        window.refreshRoleGuide();
+        document.querySelectorAll('[data-role-guide]').forEach(guide=>{
+            guide.querySelectorAll('.role-guide-detail').forEach(details=>details.addEventListener('toggle',()=>{
+                if(details.open)guide.querySelectorAll('.role-guide-detail').forEach(other=>{if(other!==details)other.open=false;});
+            }));
         });
-        for (const [id, delta] of [['guidePreviousButton', -1], ['guideNextButton', 1]]) {
-            document.getElementById(id)?.addEventListener('click', () => {
-                const guide = activeGuide();
-                if (!guide) return;
-                const index = guide.visible.indexOf(guide.current) + delta;
-                if (index >= 0 && index < guide.visible.length) select(guide, guide.visible[index], true);
-            });
-        }
-    }
-    document.addEventListener('DOMContentLoaded', initialize);
+        const modal=document.getElementById('systemGuideModal');
+        modal?.addEventListener('show.bs.modal',()=>{
+            const guide=window.refreshRoleGuide();
+            guide?.querySelectorAll('details').forEach(details=>{details.open=false;});
+            const body=modal.querySelector('.modal-body');if(body)body.scrollTop=0;
+        });
+        modal?.addEventListener('shown.bs.modal',()=>{
+            document.querySelector('[data-role-guide]:not([hidden]) .role-guide-heading')?.focus({preventScroll:true});
+        });
+        modal?.addEventListener('hidden.bs.modal',()=>{
+            document.querySelectorAll('[data-role-guide] details').forEach(details=>{details.open=false;});
+        });
+    });
 })();

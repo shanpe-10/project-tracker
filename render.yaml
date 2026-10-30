@@ -1,63 +1,69 @@
-# One free PHP web service; database and private files live in Neon.
 services:
   - type: web
-    name: laoag-project-tracker-pilot
+    name: laoag-city-ceo-project-tracker
     runtime: docker
+    repo: https://github.com/shanpe-10/project-tracker
+    branch: laoag-city-ceo-project-tracker
     plan: free
     region: singapore
-    branch: main
     dockerfilePath: ./Dockerfile
     dockerContext: .
     healthCheckPath: /up
     autoDeployTrigger: checksPass
     envVars:
       - key: APP_NAME
-        value: LGU Laoag Project Tracker Pilot
+        value: "Laoag City CEO Project Tracker"
       - key: APP_ENV
-        value: production
+        value: "production"
       - key: APP_DEBUG
         value: "false"
-      - key: APP_KEY_BASE64
-        generateValue: true
+      - key: APP_URL
+        value: "https://laoag-city-ceo-project-tracker.onrender.com"
+      - key: LOG_CHANNEL
+        value: "stderr"
+      - key: LOG_LEVEL
+        value: "warning"
+      - key: TRACKER_CLOUD
+        value: "true"
+      - key: TRACKER_MEDIA_DISK
+        value: "s3"
       - key: DB_CONNECTION
-        value: pgsql
-      - key: DB_URL
-        sync: false
+        value: "pgsql"
       - key: DB_SSLMODE
-        value: require
+        value: "require"
       - key: SESSION_DRIVER
-        value: database
+        value: "database"
       - key: SESSION_ENCRYPT
         value: "true"
       - key: SESSION_SECURE_COOKIE
         value: "true"
+      - key: SESSION_SAME_SITE
+        value: "lax"
+      - key: SESSION_COOKIE
+        value: "laoag_ceo_tracker_session"
       - key: CACHE_STORE
-        value: database
+        value: "database"
       - key: QUEUE_CONNECTION
-        value: sync
-      - key: LOG_CHANNEL
-        value: stderr
-      - key: LOG_LEVEL
-        value: warning
-      - key: TRACKER_CLOUD
-        value: "true"
-      - key: TRACKER_MEDIA_DISK
-        value: s3
+        value: "sync"
       - key: AWS_USE_PATH_STYLE_ENDPOINT
         value: "true"
+      - key: TRACKER_BOOTSTRAP_USERNAME
+        value: "superadmin"
+      - key: TRACKER_BOOTSTRAP_NAME
+        value: "Laoag City CEO Superadmin"
+      - key: APP_KEY
+        sync: false
+      - key: DB_URL
+        sync: false
       - key: AWS_ACCESS_KEY_ID
         sync: false
       - key: AWS_SECRET_ACCESS_KEY
         sync: false
+      - key: AWS_ENDPOINT
+        sync: false
       - key: AWS_DEFAULT_REGION
         sync: false
       - key: AWS_BUCKET
-        sync: false
-      - key: AWS_ENDPOINT
-        sync: false
-      - key: TRACKER_BOOTSTRAP_NAME
-        sync: false
-      - key: TRACKER_BOOTSTRAP_USERNAME
         sync: false
       - key: TRACKER_BOOTSTRAP_PASSWORD
         sync: false

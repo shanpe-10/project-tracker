@@ -17,6 +17,7 @@ class AdminBootstrapCommandTest extends TestCase
             $table->string('username')->unique();
             $table->string('full_name');
             $table->string('password_hash');
+            $table->text('password_encrypted')->nullable();
             $table->string('role');
             $table->boolean('active');
             $table->timestamp('created_at')->nullable();

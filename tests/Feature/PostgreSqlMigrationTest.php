@@ -90,7 +90,7 @@ class PostgreSqlMigrationTest extends ComprehensiveUatTest
         $controller = new \App\Http\Controllers\TrackerBackupController;
         try {
             $archive = $controller->runScheduledBackup();
-            $response = $this->withTrackerSession(['tracker_user'=>['id'=>1,'role'=>'admin'],'tracker_csrf'=>'backup-token','tracker_created_at'=>time(),'tracker_last_activity'=>time()])->withHeader('X-CSRF-Token','backup-token')->postJson('/api/backups.php',['action'=>'runManual'])->assertOk()->assertJsonPath('ok',true);
+            $response = $this->withSession(['tracker_user'=>['id'=>1,'role'=>'admin'],'tracker_csrf'=>'backup-token','tracker_created_at'=>time(),'tracker_last_activity'=>time()])->withHeader('X-CSRF-Token','backup-token')->postJson('/api/backups.php',['action'=>'runManual'])->assertOk()->assertJsonPath('ok',true);
             $manual = (string) $response->json('archivePath');
             $this->assertNotNull($archive,'An enabled schedule must produce a project backup.');
             $this->assertStringStartsWith('project-data-',basename($archive));
@@ -104,10 +104,10 @@ class PostgreSqlMigrationTest extends ComprehensiveUatTest
             $zip = new \ZipArchive;
             $this->assertTrue($zip->open($archive)===true);
             $dump = $zip->getFromName('database.sql');
-            foreach (['projects','history','project_number_sequences'] as $table) $this->assertMatchesRegularExpression('/COPY [^\r\n]+\.'.preg_quote($table,'/').' /',$dump);
+            foreach (['projects','history','project_number_sequences','deletion_requests','deletion_request_targets','deletion_request_history_hidden','audit_log','import_jobs','import_job_changes','import_staging_chunks'] as $table) $this->assertMatchesRegularExpression('/COPY [^\r\n]+\.'.preg_quote($table,'/').' /',$dump);
             $this->assertStringContainsString('Backup project',$dump);
             $this->assertStringContainsString('setval(',$dump);
-            $this->assertDoesNotMatchRegularExpression('/COPY [^\r\n]+\.(users|audit_log|application_settings|login_attempts|import_jobs|import_job_changes) /',$dump);
+            $this->assertDoesNotMatchRegularExpression('/COPY [^\r\n]+\.(users|application_settings|login_attempts) /',$dump);
             $this->assertStringNotContainsString('CREATE TABLE',$dump);
             $this->assertNotFalse($zip->locateName('exports/all-projects.xlsx'));
             $this->assertSame('Project attachment',$zip->getFromName('attachments/1/evidence.txt'));

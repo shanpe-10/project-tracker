@@ -106,8 +106,8 @@ function createServerDatabase(seed) {
                     const payload = clone(value);
                     mutation('saveTimelineRecord', { record: payload, history: clone(history) }, result => { Object.assign(value, result.record); records.projects.set(String(result.record.id), result.record); });
                 },
-                delete(id) { mutation(name === "projects" ? "deleteProject" : "deleteHistory", { id }, () => { records[name].delete(String(id)); if (name === "projects") for (const [key, item] of records.history) if (String(item.projectId) === String(id)) records.history.delete(key); }); },
-                clear() { mutation("clearStore", { store: name }, () => { records[name].clear(); if (name === "projects") records.history.clear(); }); },
+                delete(id, reason) { mutation(name === "projects" ? "deleteProject" : "deleteHistory", { id, reason }, result => { if (result.pending) return; records[name].delete(String(id)); if (name === "projects") for (const [key, item] of records.history) if (String(item.projectId) === String(id)) records.history.delete(key); }); },
+                clear(reason) { mutation("clearStore", { store: name, reason }, result => { if (result.pending) return; records[name].clear(); if (name === "projects") records.history.clear(); }); },
                 index(field) {
                     return { openCursor(keyRange) {
                         const wanted = keyRange && (keyRange.__value ?? keyRange.lower), matches = [...records[name].values()].filter(item => String(item[field]) === String(wanted));

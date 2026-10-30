@@ -19,7 +19,7 @@ final class FormattedProjectExport
         'performanceBond', 'contractRef', 'contractDuration', 'ntpDate',
         'dole', 'contractEndDate', 'preInspection', 'finalInspection',
         'swa', 'ldAmount', 'ldNoOfDays', 'ldNewCompletionDate',
-        'ldActualDuration', 'completion', 'status', 'remarks', 'materialTestingDate', 'noaDueDate', 'manualStatus',
+        'ldActualDuration', 'completion', 'status', 'remarks', 'materialTestingDate', 'noaDueDate',
     ];
 
     private const DATES = [
@@ -96,16 +96,6 @@ final class FormattedProjectExport
             $noaColumn->setAttribute('max', '32');
             $xpath->query('/x:worksheet/x:cols')->item(0)?->appendChild($noaColumn);
             $columnWidths[32] = 18;
-            $manualHeader = $header->cloneNode(true);
-            $manualHeader->setAttribute('r', 'AG1');
-            self::setCell($document, $manualHeader, 'manualStatus', 'Manual Operational Status');
-            $templateRows[1]->appendChild($manualHeader);
-            $manualColumn = $column->cloneNode(true);
-            $manualColumn->setAttribute('min', '33');
-            $manualColumn->setAttribute('max', '33');
-            $manualColumn->setAttribute('width', '26');
-            $xpath->query('/x:worksheet/x:cols')->item(0)?->appendChild($manualColumn);
-            $columnWidths[33] = 26;
             $count = 0;
             foreach ($records as $record) {
                 $count++;
@@ -123,8 +113,8 @@ final class FormattedProjectExport
                 }
                 $wrappedLines = 1;
                 foreach (self::COLUMNS as $index => $key) {
-                    if (in_array($key, ['materialTestingDate','noaDueDate','manualStatus'], true) && !isset($cells[$index])) {
-                        $cells[$index] = $cells[$key === 'manualStatus' ? 29 : 20]->cloneNode(true);
+                    if (in_array($key, ['materialTestingDate','noaDueDate'], true) && !isset($cells[$index])) {
+                        $cells[$index] = $cells[20]->cloneNode(true);
                         $row->appendChild($cells[$index]);
                     }
                     if (!isset($cells[$index])) {

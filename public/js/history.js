@@ -8,7 +8,7 @@ function formatHistorySnapshot(changes) {
     try { snapshot = typeof changes === "string" ? JSON.parse(changes) : changes; }
     catch (_) { return `<p class="mb-0">${escapeHtml(String(changes || "No details recorded."))}</p>`; }
 
-    const labels = { projectNo: "Project number", title: "Project title", status: "Status", manualStatus: "Manual operational status", biddingDate: "Bidding date", approvedBudget: "Approved budget", bidAmount: "Bid amount", winningBidder: "Winning bidder", sourceOfFund: "Source of fund", prNumber: "PR number", prDate: "PR date", noaDueDate: "NOA due date", noa: "NOA issued date", ntpDate: "Notice to proceed", completion: "Completion date", contractRef: "Contract reference", remarks: "Remarks" };
+    const labels = { projectNo: "Project number", title: "Project title", status: "Status", biddingDate: "Bidding date", approvedBudget: "Approved budget", bidAmount: "Bid amount", winningBidder: "Winning bidder", sourceOfFund: "Source of fund", prNumber: "PR number", prDate: "PR date", noaDueDate: "NOA due date", noa: "NOA issued date", ntpDate: "Notice to proceed", completion: "Completion date", contractRef: "Contract reference", remarks: "Remarks" };
     const ignored = new Set(["id", "projectId", "updatedAt", "updatedBy", "createdAt", "actor"]);
     const entries = Object.entries(snapshot || {}).filter(([key, value]) => !ignored.has(key) && value !== "" && value !== "-" && value !== null && value !== undefined);
     if (!entries.length) return '<p class="mb-0 text-muted">No saved field details.</p>';

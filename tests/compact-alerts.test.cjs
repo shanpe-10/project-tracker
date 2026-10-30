@@ -33,9 +33,9 @@ entries=context.resolvedTimelineEntries({...manual,materialTestingDate:''},today
 assert.equal(entries.find(item=>item.type==='material-overdue').automatic,undefined);
 assert.equal(entries.find(item=>item.type==='material-overdue').doneDate,'2026-10-01');
 assert.equal(context.getAutomaticTimelineResolutions({ntpDate:today},today).length,1); // Completion dates resolve legacy NTP as well.
-assert.equal(context.getAutomaticTimelineResolutions({materialTestingDate:today,ntpDate:'2026-01-01'},today).find(item=>item.type==='material-test').dueDate,'2026-01-16');
-assert.equal(context.getProjectMilestoneAlerts({biddingDate:'2026-01-31'},'2026-02-20').length,0);
-assert.equal(context.getProjectMilestoneAlerts({biddingDate:'2026-01-31'},'2026-02-21').length,3);
+assert.equal(context.getAutomaticTimelineResolutions({materialTestingDate:today,ntpDate:'2026-01-01'},today).find(item=>item.type==='material-test').dueDate,'2026-01-22');
+assert.equal(context.getProjectMilestoneAlerts({biddingDate:'2026-01-31'},'2026-02-18').length,0);
+assert.equal(context.getProjectMilestoneAlerts({biddingDate:'2026-01-31'},'2026-02-19').length,3);
 context.timelineDaySettings={material:19}; assert.equal(context.getTimelineDays('bidding'),19);
 context.timelineDaySettings={bidding:3651}; assert.equal(context.getTimelineDays('bidding'),15);
 console.log('Automatic milestone resolution, date clearing, future dates, preserved manual markers, legacy alerts, and shared reminders passed.');

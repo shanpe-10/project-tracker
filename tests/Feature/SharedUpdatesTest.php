@@ -45,7 +45,7 @@ class SharedUpdatesTest extends TestCase
 
     private function api(string $endpoint, array $body)
     {
-        return $this->withTrackerSession($this->session)->withHeader('X-CSRF-Token', 'shared-token')->postJson('/api/'.$endpoint, $body);
+        return $this->withSession($this->session)->withHeader('X-CSRF-Token', 'shared-token')->postJson('/api/'.$endpoint, $body);
     }
 
     private function project(): array
@@ -96,22 +96,22 @@ class SharedUpdatesTest extends TestCase
     {
         $record = $this->project();
         $this->asUser(2);
-        $bootstrap = $this->withTrackerSession($this->session)->getJson('/api/data.php')->assertOk();
+        $bootstrap = $this->withSession($this->session)->getJson('/api/data.php')->assertOk();
         $this->assertStringContainsString('no-store', $bootstrap->headers->get('Cache-Control'));
         $initial = $bootstrap->json('version');
         $this->assertNotEmpty($initial);
-        $version = $this->withTrackerSession($this->session)->getJson('/api/data.php?action=projectVersion')->assertOk();
+        $version = $this->withSession($this->session)->getJson('/api/data.php?action=projectVersion')->assertOk();
         $this->assertSame($initial, $version->json('version'));
         $this->assertStringContainsString('no-store', $version->headers->get('Cache-Control'));
         $this->api('data.php', ['action'=>'saveProject', 'record'=>array_replace($record, ['title'=>'Saved elsewhere'])])->assertOk();
-        $updated = $this->withTrackerSession($this->session)->getJson('/api/data.php')->assertOk();
+        $updated = $this->withSession($this->session)->getJson('/api/data.php')->assertOk();
         $this->assertNotSame($initial, $updated->json('version'));
         $this->assertSame('Saved elsewhere', $updated->json('projects.0.title'));
         $beforeSettings = $updated->json('version');
         $this->api('data.php', ['action'=>'saveTimelineSettings', 'settings'=>[
             'noa'=>11, 'ntp'=>30, 'material'=>15, 'completion'=>15, 'finalInspection'=>7, 'bidding'=>15,
         ]])->assertOk();
-        $this->assertNotSame($beforeSettings, $this->withTrackerSession($this->session)->getJson('/api/data.php?action=projectVersion')->json('version'));
+        $this->assertNotSame($beforeSettings, $this->withSession($this->session)->getJson('/api/data.php?action=projectVersion')->json('version'));
     }
 
     public function test_two_accounts_cannot_overwrite_each_others_normal_edits(): void

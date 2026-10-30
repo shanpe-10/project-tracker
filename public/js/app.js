@@ -18,6 +18,8 @@ function startApplication() {
     }
     try {
         restoreLastWorkspace();
+        refreshGlobalNotifications();
+        loadDocuments();
 
         // Install listeners once, but restore the workspace on each successful sign-in.
         if (applicationStarted) return;
@@ -25,15 +27,15 @@ function startApplication() {
         // Keep the dashboard in sync when another user updates a project.
         window.setInterval(() => {
             if (document.visibilityState === "visible") {
+                refreshGlobalNotifications();
                 if (activeWorkspace === "dashboard") loadDocuments();
-                else refreshGlobalNotifications();
             }
         }, 30000);
 
         document.addEventListener("visibilitychange", () => {
             if (document.visibilityState === "visible") {
+                refreshGlobalNotifications();
                 if (activeWorkspace === "dashboard") loadDocuments();
-                else refreshGlobalNotifications();
             }
         });
     } catch (error) {
