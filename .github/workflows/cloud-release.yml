@@ -39,6 +39,11 @@ jobs:
           node-version: '22'
       - name: Install PostgreSQL 18 recovery tools
         run: |
+          if test -x /usr/lib/postgresql/18/bin/pg_dump && test -x /usr/lib/postgresql/18/bin/pg_restore && test -x /usr/lib/postgresql/18/bin/createdb && test -x /usr/lib/postgresql/18/bin/psql; then
+            /usr/lib/postgresql/18/bin/pg_dump --version
+            /usr/lib/postgresql/18/bin/pg_restore --version
+            exit 0
+          fi
           sudo install -d /usr/share/postgresql-common/pgdg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
           echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release; echo $VERSION_CODENAME)-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list
