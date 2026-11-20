@@ -1,4 +1,4 @@
-const projectWorkdayInputIds = ['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completionDate'];
+const projectWorkdayInputIds = ['preProcurementDate','preBidDate','biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','materialRequestDate','finalInspection','swa','ldNewCompletionDate','completionDate'];
 let projectDatePickerInput = null;
 let projectDatePickerDialog = null;
 
@@ -27,6 +27,7 @@ function setupProjectWorkdayPickers() {
         const wrapper=document.createElement('div'); wrapper.className='project-workday-input';
         input.parentNode.insertBefore(wrapper,input); wrapper.append(input);
         const button=document.createElement('button'); button.type='button'; button.className='btn btn-outline-secondary'; button.textContent='▦';
+        button.disabled=input.disabled || input.readOnly;
         button.setAttribute('aria-label',`Choose date for ${document.querySelector(`label[for="${id}"]`)?.textContent.trim() || id}`);
         button.addEventListener('click',()=>openProjectWorkdayPicker(input)); wrapper.append(button);
     }
@@ -67,7 +68,9 @@ function renderProjectWorkdayPicker() {
     for (let day=1;day<=last.getUTCDate();day++) {
         const value=`${String(year).padStart(4,'0')}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
         const button=document.createElement('button'); button.type='button'; button.textContent=day; button.disabled=!projectDateIsSelectable(value);
-        const holiday=window.projectHolidayCalendar?.excludeHolidays !== false && window.projectHolidayCalendar?.years?.[year]?.[value];
+        const calendar=window.projectHolidayCalendar;
+        const excluded=calendar?.dateOverrides?.[value] ?? (calendar?.excludeHolidays !== false);
+        const holiday=excluded && calendar?.years?.[year]?.[value];
         button.title=button.disabled ? (holiday || 'Non-working weekday') : value;
         button.setAttribute('aria-label',`${value}${button.disabled ? ': '+button.title : ''}`);
         if (value===projectDatePickerInput.value) button.classList.add('selected');
@@ -76,6 +79,7 @@ function renderProjectWorkdayPicker() {
 }
 
 function chooseProjectWorkingDate(value) {
+    if (!projectDatePickerInput || projectDatePickerInput.disabled || projectDatePickerInput.readOnly) return;
     if (value && !projectDateIsSelectable(value)) return;
     projectDatePickerInput.value=value;
     projectDatePickerInput.dispatchEvent(new Event('input',{bubbles:true}));

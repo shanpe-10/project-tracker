@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 final class TrackerHolidays
 {
     private const FEED = 'https://pco.gov.ph/category/holidays/feed/?post_type=news_releases';
+    private const ARCHIVE = 'https://lawphil.net/executive/proc/';
     private static ?array $cachedCalendar = null;
     private static ?string $cachedPath = null;
 
@@ -22,6 +23,7 @@ final class TrackerHolidays
             $saved = DB::table('application_settings')->where('setting_key', 'cloud_holiday_calendar')->value('setting_value');
             if ($saved !== null) return json_decode($saved, true, 512, JSON_THROW_ON_ERROR);
         }
+
         if (config('tracker.cloud') || ! is_file(self::path())) return ['enabled'=>true, 'revision'=>0, 'overrides'=>[], 'years'=>[], 'sources'=>[], 'review'=>[], 'lastAttempt'=>null, 'lastSuccess'=>null, 'error'=>null];
         return json_decode(file_get_contents(self::path()), true, 512, JSON_THROW_ON_ERROR);
     }
@@ -44,6 +46,7 @@ final class TrackerHolidays
         ksort($calendar['years']);
         $calendar['nonWorkingDays'] = $state['nonWorkingDays'] ?? [0,6];
         $calendar['excludeHolidays'] = $state['excludeHolidays'] ?? true;
+        $calendar['dateOverrides'] = array_map(fn (array $entry): bool => (bool) $entry['nonWorking'], $state['overrides']);
         $calendar['sources'] = array_values(array_unique(array_merge($calendar['sources'], $state['sources'])));
         foreach ($calendar['pending'] ?? [] as $year=>$pending) {
             $names = implode(' ', $calendar['years'][$year] ?? []);
@@ -55,7 +58,7 @@ final class TrackerHolidays
 
     public static function status(): array
     {
-        return ['ok'=>true, 'state'=>self::state(), 'calendar'=>self::calendar(), 'source'=>'Presidential Communications Office', 'schedule'=>'Daily at 03:00 Philippine time; retries hourly after a failure.'];
+        return ['ok'=>true, 'state'=>self::state(), 'calendar'=>self::calendar(), 'source'=>'Presidential Communications Office and published proclamations', 'schedule'=>'Daily at 03:00 Philippine time; retries hourly after a failure.'];
     }
 
     private static function mutate(callable $change): array
@@ -71,6 +74,7 @@ final class TrackerHolidays
                 return $state;
             });
         }
+
         $directory = dirname(self::path());
         if (! is_dir($directory) && ! mkdir($directory, 0750, true) && ! is_dir($directory)) throw new \RuntimeException('The holiday calendar directory is unavailable.');
         $lock = fopen(self::path().'.lock', 'c');
@@ -97,8 +101,10 @@ final class TrackerHolidays
 
     private static function fetch(string $url): string
     {
-        // Only fixed official hosts and article paths are requested; redirects cannot leave the allowlist.
-        if (! preg_match('~^https://pco\.gov\.ph/(?:category/holidays/feed/\?|news_releases/[a-z0-9-]+/\z)~D', $url)) throw new \RuntimeException('Unsupported holiday source.');
+        // Only the feed, its article paths, and published proclamation indexes are requested.
+        if (! preg_match('~^https://(?:pco\.gov\.ph/(?:category/holidays/feed/\?post_type=news_releases(?:&paged=[2-6])?|news_releases/[a-z0-9-]+/)|lawphil\.net/executive/proc/proc(20\d{2})/proc\1\.html)\z~D', $url)) {
+            throw new \RuntimeException('Unsupported holiday source.');
+        }
         $response = Http::connectTimeout(5)->timeout(12)->withOptions(['allow_redirects'=>false])->withHeaders(['User-Agent'=>'LGU-Project-Tracker-Holiday-Sync/1.0', 'Accept'=>'application/rss+xml,text/html'])->get($url);
         $response->throw();
         if ($response->status() !== 200 || strlen($response->body()) > 2000000) throw new \RuntimeException('The official source returned an unsupported response.');
@@ -160,6 +166,91 @@ final class TrackerHolidays
         return checkdate($number, (int)$day, $year) ? sprintf('%04d-%02d-%02d', $year, $number, $day) : null;
     }
 
+    private static function pcoHolidays(): array
+    {
+        $years = []; $sources = []; $review = []; $seen = []; $seenNames = [];
+        for ($page = 1; $page <= 6; $page++) {
+            $xmlText = self::fetch(self::FEED.($page === 1 ? '' : '&paged='.$page));
+            $prior = libxml_use_internal_errors(true);
+            try { $xml = simplexml_load_string(ltrim($xmlText, "\xEF\xBB\xBF \t\r\n"), \SimpleXMLElement::class, LIBXML_NONET); }
+            finally { libxml_clear_errors(); libxml_use_internal_errors($prior); }
+            if (! $xml || ! isset($xml->channel)) throw new \RuntimeException('The official holiday feed could not be read.');
+            if (! count($xml->channel->item)) break;
+            $fresh = 0;
+            foreach ($xml->channel->item as $item) {
+                $title = (string)$item->title; $url = (string)$item->link;
+                if (isset($seen[$url])) continue;
+                $seen[$url] = true; $fresh++;
+                $annual = preg_match('/declares.*20\d{2}.*regular.*(?:special|holidays)/i', $title);
+                $candidate = $annual || preg_match('/Eid|nationwide|throughout.*country|national.*holiday|regular holiday/i', $title);
+                if (! $candidate || ! preg_match('~^https://pco\.gov\.ph/news_releases/[a-z0-9-]+/$~D', $url)) continue;
+                $publishedYear = (int) date('Y', strtotime((string)$item->pubDate));
+                $dates = self::parseArticle(self::fetch($url), $title, $publishedYear);
+                if (! $dates) { $review[] = ['title'=>$title,'url'=>$url]; continue; }
+                foreach ($dates as $date=>$name) {
+                    // Feed is newest first: older articles cannot overwrite a newer declaration.
+                    $year = substr($date,0,4);
+                    if (! isset($seenNames[$year][$name]) && ! isset($years[$year][$date])) { $years[$year][$date] = $name; $seenNames[$year][$name] = true; }
+                }
+                $sources[] = $url;
+            }
+            if (! $fresh) break;
+        }
+        return [$years, $sources, $review, null];
+    }
+
+    private static function archivedHolidays(): array
+    {
+        $current = (int) now('Asia/Manila')->format('Y');
+        $saved = self::calendar()['years'];
+        $years = $sources = $review = $seen = [];
+        $sourceThrough = null;
+        foreach ([$current, $current - 1] as $year) {
+            $base = self::ARCHIVE.'proc'.$year.'/';
+            $index = $base.'proc'.$year.'.html';
+            $html = self::fetch($index);
+            if (! mb_check_encoding($html, 'UTF-8')) $html = mb_convert_encoding($html, 'UTF-8', 'Windows-1252');
+            $html = preg_replace('/charset\s*=\s*["\x27]?[a-z0-9-]+/i', 'charset=UTF-8', $html);
+            $document = new \DOMDocument();
+            $loaded = $document->loadHTML('<?xml encoding="UTF-8">'.$html, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+            if (! $loaded) throw new \RuntimeException('The proclamation index could not be read.');
+            $xpath = new \DOMXPath($document);
+            $entries = 0;
+            foreach ($xpath->query('//tr[td[1]/a]') as $row) {
+                $anchor = $xpath->query('./td[1]/a', $row)->item(0);
+                $link = $anchor->getAttribute('href');
+                if (! preg_match('/^proc_\d+_'.$year.'\.html$/D', $link)) continue;
+                $entries++;
+                $source = $base.$link;
+                $publication = str_replace($anchor->textContent, '', $xpath->query('./td[1]', $row)->item(0)->textContent);
+                if (preg_match('/\b([A-Za-z]+)\s+(\d{1,2}),\s*(20\d{2})\b/', $publication, $parts)) {
+                    $sourceThrough = max($sourceThrough, self::parseDate($parts[1], $parts[2], (int) $parts[3]));
+                }
+                $title = trim(preg_replace('/\s+/u', ' ', $xpath->query('./td[2]', $row)->item(0)?->textContent ?? ''));
+                if (preg_match('/^Declaring the regular holidays and special .* for the year (20\d{2})\b/i', $title, $annual)
+                    && (int) $annual[1] >= $current && count($saved[$annual[1]] ?? []) < 14) {
+                    $review[] = ['title' => $title, 'url' => $source];
+                }
+                if (! preg_match('/^Declaring\s+[A-Za-z]+,\s*(\d{1,2})\s+([A-Za-z]+)\s+(20\d{2}),?\s+a\s+(?:regular holiday|special\s+\(?non-working\)?\s+day)\s+(?:throughout (?:the )?(?:country|Philippines)|nationwide)\b/iu', $title, $parts)) continue;
+                $date = self::parseDate($parts[2], $parts[1], (int) $parts[3]);
+                if (! $date) continue;
+                $dateYear = substr($date, 0, 4);
+                $name = match (true) {
+                    (bool) preg_match('/Eid[’\x27]?l?\s*Fitr|Eidul Fitr/iu', $title) => 'Eid’l Fitr',
+                    (bool) preg_match('/Eid[’\x27]?l?\s*Adha|Eidul Adha/iu', $title) => 'Eid’l Adha',
+                    default => $title,
+                };
+                if (isset($seen[$dateYear][$name]) || isset($years[$dateYear][$date])) continue;
+                $seen[$dateYear][$name] = true;
+                $years[$dateYear][$date] = $name;
+                $sources[] = $source;
+            }
+            if (! $entries) throw new \RuntimeException('No published proclamations were found in the index.');
+            $sources[] = $index;
+        }
+        return [$years, $sources, $review, $sourceThrough];
+    }
+
     public static function sync(bool $force = false): array
     {
         $state = self::state();
@@ -171,35 +262,14 @@ final class TrackerHolidays
         if (! flock($lock, LOCK_EX|LOCK_NB)) { fclose($lock); throw new \DomainException('A holiday sync is already running.'); }
         $attempt = now('Asia/Manila')->toIso8601String();
         try {
-            $years = []; $sources = []; $review = []; $seen = []; $seenNames = [];
-            for ($page = 1; $page <= 6; $page++) {
-                $xmlText = self::fetch(self::FEED.($page === 1 ? '' : '&paged='.$page));
-                $prior = libxml_use_internal_errors(true);
-                try { $xml = simplexml_load_string(ltrim($xmlText, "\xEF\xBB\xBF \t\r\n"), \SimpleXMLElement::class, LIBXML_NONET); }
-                finally { libxml_clear_errors(); libxml_use_internal_errors($prior); }
-                if (! $xml || ! isset($xml->channel)) throw new \RuntimeException('The official holiday feed could not be read.');
-                if (! count($xml->channel->item)) break;
-                $fresh = 0;
-                foreach ($xml->channel->item as $item) {
-                    $title = (string)$item->title; $url = (string)$item->link;
-                    if (isset($seen[$url])) continue;
-                    $seen[$url] = true; $fresh++;
-                    $annual = preg_match('/declares.*20\d{2}.*regular.*(?:special|holidays)/i', $title);
-                    $candidate = $annual || preg_match('/Eid|nationwide|throughout.*country|national.*holiday|regular holiday/i', $title);
-                    if (! $candidate || ! preg_match('~^https://pco\.gov\.ph/news_releases/[a-z0-9-]+/$~D', $url)) continue;
-                    $publishedYear = (int) date('Y', strtotime((string)$item->pubDate));
-                    $dates = self::parseArticle(self::fetch($url), $title, $publishedYear);
-                    if (! $dates) { $review[] = ['title'=>$title,'url'=>$url]; continue; }
-                    foreach ($dates as $date=>$name) {
-                        // Feed is newest first: older articles cannot overwrite a newer declaration.
-                        $year = substr($date,0,4);
-                        if (! isset($seenNames[$year][$name]) && ! isset($years[$year][$date])) { $years[$year][$date] = $name; $seenNames[$year][$name] = true; }
-                    }
-                    $sources[] = $url;
-                }
-                if (! $fresh) break;
+            try {
+                [$years, $sources, $review, $sourceThrough] = self::pcoHolidays();
+                $lastSource = 'Presidential Communications Office';
+            } catch (\Illuminate\Http\Client\HttpClientException|\RuntimeException) {
+                [$years, $sources, $review, $sourceThrough] = self::archivedHolidays();
+                $lastSource = 'Published proclamations (Lawphil)';
             }
-            self::mutate(function ($state) use ($years, $sources, $review, $attempt) {
+            self::mutate(function ($state) use ($years, $sources, $review, $attempt, $lastSource, $sourceThrough) {
                 $existing = self::calendar()['years'];
                 $removed = array_fill_keys($state['removed'] ?? [], true);
                 foreach ($years as $year=>$dates) {
@@ -212,11 +282,13 @@ final class TrackerHolidays
                 $state['removed'] = array_keys($removed);
                 $state['sources'] = array_values(array_unique(array_merge($state['sources'], $sources)));
                 $state['review'] = $review; $state['lastAttempt'] = $attempt; $state['lastSuccess'] = $attempt; $state['error'] = null;
+                $state['lastSource'] = $lastSource;
+                $state['sourceThrough'] = $sourceThrough;
                 return $state;
             });
             return self::status();
         } catch (\Throwable $error) {
-            self::mutate(function ($state) use ($attempt) { $state['lastAttempt']=$attempt; $state['error']='The official source could not be synced. The last saved calendar is still active. Try again when internet access is available.'; return $state; });
+            self::mutate(function ($state) use ($attempt) { $state['lastAttempt']=$attempt; $state['error']='The holiday sources could not be checked. The last saved calendar is still active.'; return $state; });
             report($error);
             throw new \RuntimeException('Holiday sync failed. The last saved calendar is still active.', 0, $error);
         } finally { flock($lock, LOCK_UN); fclose($lock); }

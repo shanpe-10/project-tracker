@@ -22,8 +22,10 @@ final class TrackerMilestones
     public static function isWorkday(\DateTimeImmutable $date): bool
     {
         $calendar = TrackerHolidays::calendar();
+        $key = $date->format('Y-m-d');
+        if (array_key_exists($key, $calendar['dateOverrides'])) return ! $calendar['dateOverrides'][$key];
         return ! in_array((int)$date->format('w'), $calendar['nonWorkingDays'], true)
-            && (! $calendar['excludeHolidays'] || ! isset($calendar['years'][$date->format('Y')][$date->format('Y-m-d')]));
+            && (! $calendar['excludeHolidays'] || ! isset($calendar['years'][$date->format('Y')][$key]));
     }
 
     public static function weekday(?\DateTimeImmutable $date): ?\DateTimeImmutable
@@ -46,7 +48,7 @@ final class TrackerMilestones
         return self::weekday($date->modify(($seconds >= 0 ? '+' : '').$seconds.' seconds'));
     }
 
-    public static function dueDates(array $project): array
+    public static function dueDates(array $project, array $settings = []): array
     {
         $bidding = self::date($project['biddingDate'] ?? null);
         $biddingDue = null;
@@ -60,13 +62,13 @@ final class TrackerMilestones
         $end = $start && $days !== null
             ? self::addWorkdays($start, $days)
             : self::weekday(self::date($project['contractEndDate'] ?? null));
-        return ['noaDueDate'=>self::weekday(self::date($project['noaDueDate'] ?? null))?->format('Y-m-d'), 'preInspectionDueDate'=>$biddingDue, 'ntpDueDate'=>$biddingDue, 'materialTestingDueDate'=>$biddingDue, 'contractDueDate'=>$end?->format('Y-m-d'), 'finalInspectionDueDate'=>$end?->format('Y-m-d')];
+        return ['noaDueDate'=>self::weekday(self::date($project['noaDueDate'] ?? null))?->format('Y-m-d'), 'preInspectionDueDate'=>$biddingDue, 'ntpDueDate'=>$biddingDue, 'materialTestingDueDate'=>$biddingDue, 'contractEndReminderDate'=>$end ? self::addWorkdays($end, (int)($settings['contractEnd'] ?? 7))->format('Y-m-d') : null, 'contractDueDate'=>$end?->format('Y-m-d'), 'finalInspectionDueDate'=>$end?->format('Y-m-d')];
     }
 
     public static function alerts(array $project, array $settings, \DateTimeImmutable $today): array
     {
-        if (! empty($project['archivedAt']) || ! empty($project['timelineCompletedMarked']) || in_array(strtolower(TrackerProjectInput::automaticStatus($project,$today)), ['completed','released'], true)) return [];
-        $dueDates = self::dueDates($project);
+        if (! empty($project['archivedAt']) || ! empty($project['timelineCompletedMarked']) || in_array(strtolower(TrackerProjectInput::effectiveStatus($project,$today)), ['completed','released'], true)) return [];
+        $dueDates = self::dueDates($project, $settings);
         $resolved = is_array($project['timelineAlertsCompleted'] ?? null) ? $project['timelineAlertsCompleted'] : [];
         $today = $today->format('Y-m-d');
         $alerts = [];
@@ -83,6 +85,7 @@ final class TrackerMilestones
         $append('ntpDueDate','ntpDate','ntp-due','ntp-due-overdue','Notice to Proceed',(int) ($settings['bidding'] ?? $settings['material'] ?? 15));
         $append('materialTestingDueDate','materialTestingDate','material-test','material-overdue','Material Testing',(int) ($settings['bidding'] ?? $settings['material'] ?? 15));
         $append('finalInspectionDueDate','finalInspection','final-inspection','final-inspection-overdue','Final Inspection',(int) ($settings['finalInspection'] ?? 7));
+        $append('contractEndReminderDate','completion','contract-end','contract-end-overdue','Contract End Follow-up',0);
         return $alerts;
     }
 
@@ -95,10 +98,12 @@ final class TrackerMilestones
             ['ntpDate','ntp-due',['ntp-due','ntp-due-overdue','ntp-award','ntp-overdue']],
             ['materialTestingDate','material-test',['material-test','material-overdue']],
             ['finalInspection','final-inspection',['final-inspection','final-inspection-overdue']],
+            ['completion','contract-end',['contract-end','contract-end-overdue']],
             ['swa','award-overdue',['award-close','award-overdue']],
         ];
         $resolved = [];
         foreach ($definitions as [$field, $type, $aliases]) {
+            if ($type === 'contract-end' && !$dates['contractDueDate']) continue;
             $date = self::date($project[$field] ?? null);
             if ($date && $date->format('Y-m-d') <= $today->format('Y-m-d')) {
                 $resolved[] = ['type'=>$type,'aliases'=>$aliases,'doneDate'=>$date->format('Y-m-d')];

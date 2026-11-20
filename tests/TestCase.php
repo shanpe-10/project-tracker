@@ -66,10 +66,10 @@ abstract class TestCase extends BaseTestCase
         config(['tracker_holidays.state_path'=>$this->calendarFixture]);
         \App\Support\TrackerHolidays::update(0, function ($state) { $state['nonWorkingDays']=[0,6]; $state['excludeHolidays']=false; return $state; });
     }
-    protected function confirmDirectFixture(array $target) {
+    protected function confirmDirectFixture(array $target, string $password = 'fixture-password') {
         $preview=$this->postJson('/api/deletion-requests.php',['action'=>'previewDirect']+$target)->assertOk()->json('selection');
         $prepared=$this->postJson('/api/deletion-requests.php',['action'=>'prepareDirect','expectedVersion'=>$preview['version'],'reason'=>'Disposable regression fixture']+$target)->assertOk();
-        return $this->postJson('/api/deletion-requests.php',['action'=>'confirmDirect','confirmationToken'=>$prepared->json('confirmationToken'),'confirmed'=>true]);
+        return $this->postJson('/api/deletion-requests.php',['action'=>'confirmDirect','confirmationToken'=>$prepared->json('confirmationToken'),'confirmed'=>true,'current_password'=>$password]);
     }
 
 }

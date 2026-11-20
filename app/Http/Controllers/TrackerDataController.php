@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Support\FormattedProjectExport;
+use App\Support\TrackerProjectFields;
+use App\Support\TrackerProjectRevision;
 use App\Support\TrackerMilestones;
 use App\Support\TrackerHistory;
 use Illuminate\Http\JsonResponse;
@@ -15,7 +17,7 @@ class TrackerDataController extends Controller
     private const PROJECT_DATE_FIELDS = [
         'biddingDate', 'prDate', 'obre', 'resolutionDate', 'noticePostQual',
         'noa', 'noaDueDate', 'performanceBond', 'contractRef', 'ntpDate', 'dole',
-        'contractEndDate', 'preInspection', 'materialTestingDate', 'finalInspection', 'swa',
+        'contractEndDate', 'preInspection', 'materialTestingDate', 'materialRequestDate', 'finalInspection', 'swa',
         'ldNewCompletionDate', 'completion',
     ];
 
@@ -45,7 +47,7 @@ class TrackerDataController extends Controller
             'listProjects' => $this->listProjects($request),
             'projectHistory' => $this->projectHistory($request),
             'projectVersion' => response()->json(['ok' => true, 'version' => $this->projectVersion()]),
-            'nextProjectNumber' => response()->json(['ok' => true, 'nextProjectNumber' => (string) max(1, (int) DB::table('project_number_sequences')->where('sequence_name', 'projects')->value('next_number'))]),
+            'nextProjectNumber' => response()->json(['ok' => true] + \App\Support\TrackerProjectNumber::preview()),
             'dashboard' => $this->dashboard($request),
             'notifications' => $this->notifications(),
             'projectAlerts' => $this->projectAlertDetails($request),
@@ -138,7 +140,7 @@ class TrackerDataController extends Controller
         if (($search = trim((string) $request->query('search', ''))) !== '') {
             $query->where(function ($q) use ($search) {
                 foreach (['project_no', 'title', 'winning_bidder', 'pr_number', 'source_of_fund'] as $i => $column) {
-                    if (DB::connection()->getDriverName() === 'pgsql') $column .= ' COLLATE "C"';
+                    if (DB::connection()->getDriverName() === 'pgsql') $column .= ' COLLATE "und-x-icu"';
                     $i ? $q->orWhereRaw("LOWER({$column}) LIKE ?", [mb_strtolower("%$search%")]) : $q->whereRaw("LOWER({$column}) LIKE ?", [mb_strtolower("%$search%")]);
                 }
             });
@@ -198,10 +200,10 @@ class TrackerDataController extends Controller
                 return response()->json(['ok' => false, 'message' => 'You do not have permission to export projects.'], 403);
             }
             $rows = $query->orderByRaw($order)->pluck('data');
-            $columns = ['projectNo' => 'Project No.', 'biddingDate' => 'Date of Bidding', 'title' => 'Project Title', 'approvedBudget' => 'ABC', 'bidAmount' => 'Bid Amount', 'winningBidder' => 'Winning Bidder', 'sourceOfFund' => 'Source of Fund', 'prNumber' => 'PR Number', 'prDate' => 'PR Date', 'obre' => 'OBRE', 'resolutionNumber' => 'Resolution Number', 'resolutionDate' => 'Resolution Date', 'noticePostQual' => 'Notice of Post Qualification', 'noa' => 'Notice of Award', 'performanceBond' => 'Performance Bond', 'contractRef' => 'Contract Date', 'contractDuration' => 'Contract Duration', 'ntpDate' => 'Notice to Proceed', 'dole' => 'DOLE Clearance', 'contractEndDate' => 'Contract End Date', 'preInspection' => 'Pre Inspection', 'finalInspection' => 'Final Inspection', 'swa' => 'SWA', 'ldAmount' => 'LD Amount', 'ldNoOfDays' => 'LD Days', 'ldNewCompletionDate' => 'Extended Completion Date', 'ldActualDuration' => 'Actual Construction Duration', 'completion' => 'Completion Date', 'status' => 'Operational Status', 'remarks' => 'Additional Remarks', 'materialTestingDate' => 'Material Testing Date', 'noaDueDate' => 'NOA Due Date'];
+            $columns = TrackerProjectFields::columns();
 
             if ($request->query('format') === 'xlsx') {
-                $records = $rows->map(fn ($json) => json_decode($json, true) ?: []);
+                $records = $rows->map(fn ($json) => TrackerProjectRevision::exportRecord(json_decode($json, true) ?: []));
                 $path = FormattedProjectExport::create($records, public_path('templates/project-export-template.xlsx'));
 
                 return response()->streamDownload(function () use ($path) {
@@ -220,8 +222,8 @@ class TrackerDataController extends Controller
                 fwrite($out, "\xEF\xBB\xBF");
                 fputcsv($out, array_values($columns), ',', '"', '');
                 foreach ($rows as $json) {
-                    $record = json_decode($json, true) ?: [];
-                    fputcsv($out, array_map(fn ($key) => $this->csvText($record[$key] ?? null), array_keys($columns)), ',', '"', '');
+                    $record = TrackerProjectRevision::exportRecord(json_decode($json, true) ?: []);
+                    fputcsv($out, array_map(fn ($key) => $this->csvText(TrackerProjectFields::isNotApplicable($record) && str_starts_with($key,'ld') ? TrackerProjectFields::display($record,$key) : ($record[$key] ?? null)), array_keys($columns)), ',', '"', '');
                 } fclose($out);
             }, 'LGU_Project_Tracker_'.date('Y-m-d').'.csv', ['Content-Type' => 'text/csv; charset=utf-8']);
         }
@@ -246,12 +248,15 @@ class TrackerDataController extends Controller
         if ($id < 1) {
             return response()->json(['ok' => false, 'message' => 'Invalid project id.'], 422);
         }
-        $p = DB::table('history as h')
+        $ordered = DB::table('history as h')->where('h.project_id', $id)
+            ->orderByDesc('h.event_at')->orderByDesc('h.id');
+        $p = (clone $ordered)
             ->leftJoin('users as u', 'u.id', '=', 'h.updated_by')
-            ->select('h.*', 'u.id as actor_id', 'u.username as actor_username', 'u.full_name as actor_full_name')
-            ->where('h.project_id', $id)->orderByDesc('h.event_at')->orderByDesc('h.id')->paginate($pageSize);
-        $history = collect($p->items())->map(function ($row) {
-            $record = json_decode($row->data, true) ?: [];
+            ->select('h.*', 'u.id as actor_id', 'u.username as actor_username', 'u.full_name as actor_full_name')->paginate($pageSize);
+        $history = [];
+        $newerSnapshot = null;
+        foreach ($p->items() as $index => $row) {
+            $record = TrackerHistory::snapshot($row->data) ?? [];
             $record['id'] = (int) $row->id;
             // New logs retain the account at the time of the action. Older logs use their own actor.
             if (! is_array($record['actor'] ?? null)) {
@@ -259,8 +264,25 @@ class TrackerDataController extends Controller
                     'id' => $row->actor_id, 'username' => $row->actor_username, 'fullName' => $row->actor_full_name,
                 ]) : ['id' => null, 'username' => is_string($record['updatedBy'] ?? null) ? $record['updatedBy'] : '', 'fullName' => ''];
             }
-            return $record;
-        });
+
+            $before = TrackerHistory::snapshot($record['changes'] ?? null);
+            if (TrackerHistory::isLegacyEdit($record, $before)) {
+                $source = 'next';
+                if ($index === 0 && $p->currentPage() === 1) {
+                    $newerSnapshot = TrackerHistory::snapshot(DB::table('projects')->where('id', $id)->value('data'));
+                    $source = 'current';
+                } elseif ($index === 0) {
+                    $neighbor = TrackerHistory::snapshot($ordered->offset($p->firstItem() - 2)->value('h.data'));
+                    $newerSnapshot = TrackerHistory::snapshot($neighbor['changes'] ?? null);
+                }
+                if (TrackerHistory::matchesLegacyEdit($record, $before, $newerSnapshot)) {
+                    $record['after'] = $newerSnapshot;
+                    $record['comparisonSource'] = $source;
+                }
+            }
+            $history[] = $record;
+            $newerSnapshot = $before;
+        }
 
         return response()->json(['ok' => true, 'history' => $history, 'page' => $p->currentPage(), 'pageSize' => $pageSize, 'totalRecords' => $p->total(), 'totalPages' => $p->lastPage()]);
     }
@@ -298,11 +320,11 @@ class TrackerDataController extends Controller
         $project['id'] = (int) $row->id;
         $today = new \DateTimeImmutable('today', new \DateTimeZone('Asia/Taipei'));
         $alerts = array_map(fn ($alert)=>array_diff_key($alert,['project'=>true])+['status'=>'Active'], $this->projectAlerts($project,$this->timelineSettings(),$today));
-        $dates = TrackerMilestones::dueDates($project);
+        $dates = TrackerMilestones::dueDates($project, $this->timelineSettings());
         foreach (TrackerMilestones::automaticResolutions($project,$today) as $resolved) {
             $due = match ($resolved['type']) {
                 'pre-inspection'=>$dates['preInspectionDueDate'], 'ntp-due'=>$dates['ntpDueDate'],
-                'material-test'=>$dates['materialTestingDueDate'], 'final-inspection'=>$dates['finalInspectionDueDate'],
+                'contract-end'=>$dates['contractEndReminderDate'], 'material-test'=>$dates['materialTestingDueDate'], 'final-inspection'=>$dates['finalInspectionDueDate'],
                 'award-overdue','award-close'=>$this->projectDate($project, 'completion') ? TrackerMilestones::weekday($this->projectDate($project, 'completion')->modify('+1 year'))->format('Y-m-d') : null,
                 'noa-due'=>$dates['noaDueDate'], 'noa-active'=>$project['noa'] ?? null,
                 default=>null,
@@ -315,7 +337,7 @@ class TrackerDataController extends Controller
             $alerts[] = ['type'=>$type,'label'=>$this->alertLabel($type),'status'=>'Resolved','doneDate'=>$project['timelineMarkedDoneDate'] ?? null];
         }
         if (! $row->archived_at && empty($project['timelineCompletedMarked']) && ! in_array(strtolower($project['status'] ?? ''),['completed','released'],true)) {
-            foreach (['noa-due'=>'noaDueDate','pre-inspection'=>'preInspectionDueDate','ntp-due'=>'ntpDueDate','material-test'=>'materialTestingDueDate','final-inspection'=>'finalInspectionDueDate'] as $type=>$field) {
+            foreach (['noa-due'=>'noaDueDate','pre-inspection'=>'preInspectionDueDate','ntp-due'=>'ntpDueDate','material-test'=>'materialTestingDueDate','final-inspection'=>'finalInspectionDueDate','contract-end'=>'contractEndReminderDate'] as $type=>$field) {
                 if ($dates[$field] && ! array_filter($alerts,fn ($a)=>str_starts_with($a['type'],$type) || ($type==='material-test' && str_starts_with($a['type'],'material')))) {
                     $alerts[] = ['type'=>$type,'label'=>$this->alertLabel($type),'status'=>'Upcoming','dueDate'=>$dates[$field]];
                 }
@@ -329,7 +351,7 @@ class TrackerDataController extends Controller
         return match (true) {
             str_starts_with($type,'noa')=>'Notice of Award', str_starts_with($type,'ntp')=>'Notice to Proceed',
             str_starts_with($type,'pre-inspection')=>'Pre-Inspection', str_starts_with($type,'final-inspection')=>'Final Inspection',
-            str_starts_with($type,'material')=>'Material Testing', str_starts_with($type,'award')=>'SWA / Completion',
+            str_starts_with($type,'contract-end')=>'Contract End Follow-up', str_starts_with($type,'material')=>'Material Testing', str_starts_with($type,'award')=>'SWA / Completion',
             default=>ucwords(str_replace('-',' ',$type)),
         };
     }
@@ -346,7 +368,7 @@ class TrackerDataController extends Controller
         $completionYear = (int) $request->query('completionYear', $statusYear);
         $alertPage = max(1, (int) $request->query('alertPage', 1));
         $alertPageSize = max(10, min(100, (int) $request->query('alertPageSize', 25)));
-        $alertSearch = strtolower(trim((string) $request->query('alertSearch', '')));
+        $alertSearch = mb_strtolower(trim((string) $request->query('alertSearch', '')));
         $statusYears = [];
         $completionYears = [];
         $alerts = [];
@@ -379,7 +401,7 @@ class TrackerDataController extends Controller
                 }
             }
             $projectAlerts = $this->projectAlerts($record, $settings, $today);
-            $haystack = strtolower(implode(' ', [$record['projectNo'] ?? '', $record['title'] ?? '', $record['winningBidder'] ?? '',
+            $haystack = mb_strtolower(implode(' ', [$record['projectNo'] ?? '', $record['title'] ?? '', $record['winningBidder'] ?? '',
                 ...array_column($projectAlerts,'label'), ...array_column($projectAlerts,'type'), ...array_column($projectAlerts,'dueDate')]));
             if ($alertSearch === '' || str_contains($haystack, $alertSearch)) array_push($alerts, ...$projectAlerts);
         }
@@ -449,7 +471,7 @@ class TrackerDataController extends Controller
                 return response()->json(['ok' => false, 'message' => 'Approved Budget is required and must be a non-negative amount with at most two decimal places.'], 422);
             }
         }
-        if ($project && strtolower(trim((string) ($record['status'] ?? ''))) === 'completed' && ! self::validProjectDate($record['completion'] ?? null)) {
+        if ($project && ($record['statusMode'] ?? '') !== 'manual' && strtolower(trim((string) ($record['status'] ?? ''))) === 'completed' && ! self::validProjectDate($record['completion'] ?? null)) {
             $previous = $id ? json_decode((string) DB::table('projects')->where('id', $id)->value('data'), true) : null;
             $legacyUndated = is_array($previous)
                 && strtolower(trim((string) ($previous['status'] ?? ''))) === 'completed'
@@ -507,9 +529,7 @@ class TrackerDataController extends Controller
                 }
             } else {
                 DB::transaction(function () use (&$id, &$record, &$json, $user) {
-                    $number = (int) DB::table('project_number_sequences')->where('sequence_name', 'projects')->lockForUpdate()->value('next_number');
-                    DB::table('project_number_sequences')->where('sequence_name', 'projects')->update(['next_number' => $number + 1]);
-                    $record['projectNo'] = (string) $number;
+                    $record['projectNo'] = \App\Support\TrackerProjectNumber::allocate();
                     $json = json_encode($record, JSON_UNESCAPED_UNICODE);
                     $id = DB::table('projects')->insertGetId(['data' => $json] + $this->projectColumns($record) + ['updated_by' => $user['id'], 'updated_at' => now()]);
                 });
@@ -630,8 +650,8 @@ class TrackerDataController extends Controller
         }
         $valid = [];
         $current = $this->timelineSettings();
-        foreach (['noa', 'ntp', 'material', 'completion', 'finalInspection', 'bidding'] as $key) {
-            $value = filter_var((in_array($key, ['finalInspection', 'bidding'], true) && ! array_key_exists($key, $settings ?? [])) ? $current[$key] : ($settings[$key] ?? null), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 3650]]);
+        foreach (['noa', 'ntp', 'material', 'completion', 'finalInspection', 'bidding', 'contractEnd'] as $key) {
+            $value = filter_var((in_array($key, ['finalInspection', 'bidding', 'contractEnd'], true) && ! array_key_exists($key, $settings ?? [])) ? $current[$key] : ($settings[$key] ?? null), FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 3650]]);
             if ($value === false) {
                 return response()->json(['ok' => false, 'message' => 'Timeline days must be whole numbers from 1 to 3,650.'], 422);
             } $valid[$key] = $value;
@@ -675,13 +695,14 @@ class TrackerDataController extends Controller
         if (empty($user['canImport'])) return response()->json(['ok'=>false,'message'=>'Import permission is required.'],403);
         $request->validate(['batchId'=>'required|string|regex:/^[A-Za-z0-9_-]{12,64}$/D','records'=>'required|array|min:1|max:5000', 'chunkIndex'=>'sometimes|integer|min:0', 'expectedRows'=>'sometimes|integer|min:1']);
         $batch = (string)$request->input('batchId');
-        $records = $request->input('records');
+        $records = array_map(fn ($record) => is_array($record) ? \App\Support\TrackerProjectInput::withoutBlankAdditionalImportFields($record) : $record, $request->input('records'));
         foreach ($records as $record) {
             if (!is_array($record) || trim((string)($record['title'] ?? '')) === '') {
                 throw \Illuminate\Validation\ValidationException::withMessages(['records'=>'Every imported row requires a project title.']);
             }
             \App\Support\TrackerProjectInput::validate($record);
-            \App\Support\TrackerProjectInput::validateDates($record, !empty($record['id']) ? (json_decode((string)DB::table('projects')->where('id',$record['id'])->value('data'),true) ?: []) : []);
+            $previous = !empty($record['id']) ? (json_decode((string)DB::table('projects')->where('id',$record['id'])->value('data'),true) ?: []) : [];
+            \App\Support\TrackerProjectInput::validateDates(array_replace($previous, $record), $previous);
         }
         return DB::transaction(function () use ($request,$user,$batch,$records) {
             DB::table('project_number_sequences')->where('sequence_name','projects')->lockForUpdate()->first();
@@ -719,7 +740,7 @@ class TrackerDataController extends Controller
         }
         try {
             $count = DB::transaction(function () use ($records, $batch, $user, $archiveImport) {
-                DB::table('project_number_sequences')->where('sequence_name','projects')->lockForUpdate()->first();
+                \App\Support\TrackerProjectNumber::synchronize();
                 $job = DB::table('import_jobs')->where('batch_id', $batch)->lockForUpdate()->first();
                 if ($job && ((int) $job->actor_id !== (int) $user['id'] || $job->status !== 'running' || $job->rolled_back_at)) {
                     throw new \DomainException('This import batch is unavailable. Start a new import.');
@@ -728,22 +749,26 @@ class TrackerDataController extends Controller
                     DB::table('import_jobs')->insert(['batch_id' => $batch, 'actor_id' => $user['id'], 'status' => 'running']);
                 }
                 $count = 0;
+                $reservedNumbers = [];
+                foreach ($records as $incoming) {
+                    if (empty($incoming['id']) && empty($incoming['autoProjectNumber'])) {
+                        $reservedNumbers[trim((string) ($incoming['projectNo'] ?? ''))] = true;
+                    }
+                }
                 foreach ($records as $record) {
                     if (is_array($record)) \App\Support\TrackerProjectInput::validate($record);
                     if (! is_array($record) || trim((string) ($record['title'] ?? '')) === '') {
                         throw new \DomainException('Every imported row requires a project title.');
                     }
+                    $record = TrackerProjectRevision::normalizeFields($record);
                     foreach (self::PROJECT_DATE_FIELDS as $field) {
                         if (trim((string) ($record[$field] ?? '')) !== '' && ! self::validProjectDate($record[$field])) {
                             throw new \DomainException("Invalid {$field} date in an imported row.");
                         }
                     }
                     $id = is_numeric($record['id'] ?? null) ? (int) $record['id'] : 0;
-                    unset($record['id'], $record['attachments'], $record['archivedAt'], $record['archivedBy'], $record['timelineAlertsCompleted'], $record['timelineCompletedMarked'], $record['timelineMarkedDoneDate'], $record['timelineUnmarkedType'], $record['timelineUnmarkedAt']);
-                    $projectNo = trim((string) ($record['projectNo'] ?? ''));
-                    if ($projectNo !== '' && DB::table('projects')->where('project_no', $projectNo)->when($id > 0, fn ($query) => $query->where('id', '<>', $id))->exists()) {
-                        throw new \DomainException("Project number {$projectNo} already exists. Choose Add as new with a new number or overwrite the matching project.");
-                    }
+                    $automaticNumber = ($record['autoProjectNumber'] ?? false) === true;
+                    unset($record['autoProjectNumber'], $record['id'], $record['attachments'], $record['archivedAt'], $record['archivedBy'], $record['timelineAlertsCompleted'], $record['timelineCompletedMarked'], $record['timelineMarkedDoneDate'], $record['timelineUnmarkedType'], $record['timelineUnmarkedAt']);
                     $existing = $id ? DB::table('projects')->where('id', $id)->lockForUpdate()->first() : null;
                     if ($id && ! $existing) {
                         throw new \DomainException("Project ID $id no longer exists.");
@@ -759,15 +784,25 @@ class TrackerDataController extends Controller
                             throw new \DomainException('This project changed since import review. Refresh and review the spreadsheet again.');
                         }
                         $record = array_replace($original, $record);
+                        $record['projectNo'] = $original['projectNo'] ?? \App\Support\TrackerProjectNumber::allocate($reservedNumbers);
                         if ($existing->archived_at === null) {
                             unset($record['archivedAt'], $record['archivedBy']);
                         } else {
                             $record['archivedAt'] = $original['archivedAt'] ?? date('c', strtotime($existing->archived_at));
                             $record['archivedBy'] = $original['archivedBy'] ?? null;
                         }
-                    } elseif ($archiveImport) {
-                        $record['archivedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
-                        $record['archivedBy'] = $user['username'];
+                    } else {
+                        if ($automaticNumber || trim((string) ($record['projectNo'] ?? '')) === '') {
+                            $record['projectNo'] = \App\Support\TrackerProjectNumber::allocate($reservedNumbers);
+                        }
+                        if ($archiveImport) {
+                            $record['archivedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
+                            $record['archivedBy'] = $user['username'];
+                        }
+                    }
+                    $projectNo = trim((string) ($record['projectNo'] ?? ''));
+                    if ($projectNo !== '' && DB::table('projects')->where('project_no', $projectNo)->when($id > 0, fn ($query) => $query->where('id', '<>', $id))->exists()) {
+                        throw new \DomainException("Project number {$projectNo} already exists. Choose Add as new with a new number or overwrite the matching project.");
                     }
                     \App\Support\TrackerProjectInput::validateDates($record, isset($original) ? $original : []);
                     $record = \App\Support\TrackerProjectInput::normalize($record);
@@ -787,8 +822,7 @@ class TrackerDataController extends Controller
                     $count++;
                 }
                 DB::table('import_jobs')->where('batch_id', $batch)->increment('processed_count', $count);
-                $highest = (int) DB::table('projects')->whereRaw(\App\Support\TrackerSql::numericPredicate())->max(DB::raw(\App\Support\TrackerSql::number()));
-                DB::table('project_number_sequences')->where('sequence_name', 'projects')->update(['next_number' => $highest + 1]);
+                \App\Support\TrackerProjectNumber::synchronize();
                 $this->audit($user, 'project.bulk_imported', 'project', null, "Imported $count project rows.");
 
                 return $count;
@@ -879,8 +913,7 @@ class TrackerDataController extends Controller
                     $count++;
                 }
                 DB::table('import_jobs')->where('batch_id', $batch)->update(['status' => 'rolled_back', 'rolled_back_at' => now()]);
-                $highest = (int) DB::table('projects')->whereRaw(\App\Support\TrackerSql::numericPredicate())->max(DB::raw(\App\Support\TrackerSql::number()));
-                DB::table('project_number_sequences')->where('sequence_name', 'projects')->update(['next_number' => $highest + 1]);
+                \App\Support\TrackerProjectNumber::synchronize();
                 $this->audit($user, 'project.import_rolled_back', 'import_job', null, "Rolled back import $batch.");
 
                 return $count;
@@ -955,7 +988,7 @@ class TrackerDataController extends Controller
     {
         foreach (['completion','swa'] as $field) {
             if (TrackerMilestones::date($project[$field] ?? null) && $project[$field] > $today->format('Y-m-d')) {
-                $project['status'] = \App\Support\TrackerProjectInput::automaticStatus($project,$today); break;
+                $project['status'] = \App\Support\TrackerProjectInput::effectiveStatus($project,$today); break;
             }
         }
         $alerts = TrackerMilestones::alerts($project, $settings, $today);
@@ -1015,7 +1048,7 @@ class TrackerDataController extends Controller
     private function timelineSettings(): array
     {
         $saved = json_decode((string) DB::table('application_settings')->where('setting_key', 'timeline_days')->value('setting_value'), true) ?: [];
-        return array_replace(['noa' => 10, 'ntp' => 30, 'material' => 15, 'completion' => 15, 'finalInspection' => 7, 'bidding' => $saved['material'] ?? 15], $saved);
+        return array_replace(['noa' => 10, 'ntp' => 30, 'material' => 15, 'completion' => 15, 'finalInspection' => 7, 'contractEnd' => 7, 'bidding' => $saved['material'] ?? 15], $saved);
     }
 
     public static function projectColumns(array $r): array

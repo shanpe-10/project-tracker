@@ -25,14 +25,17 @@ for(const [before,after] of [[false,true],[true,false]]) {
     });
 }
 test('Form and import number/date validation preserves decimals and rejects invalid values',()=>{
-    const context={Intl,Date,Number}; vm.runInNewContext(extract(source('projects.js'),'validateProjectNumbersAndActualDates'),context);
+    const context={Intl,Date,Number,document:{addEventListener(){}}};
+    vm.runInNewContext(source('project-fields.js'),context);
+    vm.runInNewContext(source('project-revision.js'),context);
+    vm.runInNewContext(extract(source('projects.js'),'validateProjectNumbersAndActualDates'),context);
     const validate=context.validateProjectNumbersAndActualDates;
     assert.equal(validate({ldAmount:'123.45',ldNoOfDays:'.5',ldActualDuration:'0',contractDuration:'30.5'}).length,0);
-    for(const field of ['ldAmount','ldNoOfDays','ldActualDuration','contractDuration']) {
+    for(const field of ['approvedBudget','bidAmount','materialTestingAmount']) {
         for(const value of ['-1','text','Infinity','NaN','1e9',true]) assert(validate({[field]:value}).length>0);
     }
     for(const field of ['completion','swa']) assert(validate({[field]:'9999-01-04'}).length>0);
-    assert(source('excel.js').includes('validateProjectNumbersAndActualDates(payload)'));
+    assert.match(source('excel.js'), /validateProjectNumbersAndActualDates\(/);
 });
 test('Future actual dates cannot cause premature terminal form status',()=>{
     const values={swa:'9999-01-04',completionDate:'9999-01-04',status:'Released',biddingDate:'2026-01-05'};

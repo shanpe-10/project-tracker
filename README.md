@@ -1,13 +1,64 @@
-# LGU Laoag Project Tracker
+# Project Tracker source code
 
-The Project Tracker is a shared system for project records, dates, reminders, attachments, exports, and backups. Employees use it in a browser; the database and application run on the LGU server.
+Editable Laravel application source, prepared 20 November 2026 from the current
+Project Tracker application and the existing Render cloud integrations.
 
-**Start here:** [Setup and user guide](SETUP-AND-USER-GUIDE.md). It includes the step-by-step server and database setup, first administrator account, staff onboarding, backups, and daily use. The guide was revised on 30 October 2026 for the current password-viewing, deletion/history and calendar features.
+## Start here
 
-For a new installation, the schema-only database file is [database/lgu_project_tracker_schema.sql](database/lgu_project_tracker_schema.sql). It contains no accounts or project data. Create the first IT Superadmin interactively with `php artisan tracker:create-superadmin` after configuring the database. Superadmin then creates Admin and Staff accounts in Accounts; its workspace also manages working days and holidays.
+- `app/`: PHP controllers, models, commands, and business rules.
+- `resources/views/`: Blade page templates.
+- `public/js/` and `public/css/`: application JavaScript and styles.
+- `routes/`, `database/`, and `tests/`: endpoints, migrations, and regressions.
+- `Dockerfile`, `deploy/`, and `render.yaml`: the existing Render deployment.
 
-The tracker is intended to be opened through Apache at `/project-tracker/public/` or an IT-configured address. Keep `.env`, database credentials, attachments, profile photos, and backup files outside the public website folder.
+This folder is a source project. It does not install Windows services or contain
+the Windows installer, runtime bundles, private configuration, or office records.
+Composer installs PHP dependencies; the checked-in public assets serve the UI.
 
-Developers can check the application with `php artisan test`, `node --test tests/*.test.cjs`, and `npm run build`. SQLite remains available only for fast regression tests. PostgreSQL integration tests use `phpunit.pgsql.xml` and the actual production schema.
+## Run a separate development copy
 
-See [PostgreSQL migration and cutover](POSTGRESQL-MIGRATION.md) for configuration, data transfer, testing, and backups. Historical MySQL schemas and backup archives are obsolete migration sources only.
+Requirements: PHP 8.4.1 or later with pdo_pgsql, mbstring, zip, intl and XML;
+Composer 2; and PostgreSQL 18. Node.js 22 or later is used for JavaScript tests
+and optional Vite asset work.
+
+1. Create an empty development PostgreSQL database, such as `project_tracker_dev`.
+2. Run `composer install` and copy `.env.example` to `.env`.
+3. Fill the development database connection in `.env`, then run
+   `php scripts/initialize-environment.php` to generate this copy's encryption key.
+4. Run `php artisan migrate` and `php artisan tracker:create-admin`.
+5. Run `php artisan serve` and open the address it prints.
+
+Use a separate development database and media folders for this copy. Do not copy
+the installed office host's `.env`, database, accounts, or private files into Git.
+For optional Vite work, run `npm ci` and `npm run build`.
+
+## Render deployment
+
+Existing site: https://laoag-city-ceo-project-tracker.onrender.com
+Repository: https://github.com/shanpe-10/project-tracker
+Branch: `laoag-city-ceo-project-tracker`
+
+The existing service builds `Dockerfile`; `deploy/start.sh` starts the application
+and applies pending migrations. Keep the existing Render application key,
+PostgreSQL connection, and private S3 storage settings. Values belong in Render's
+private environment, using `.env.render.example` as the list of required keys.
+Never generate a replacement key for the existing hosted application.
+
+The current app uses Admin and Staff roles. The role migration preserves existing
+usernames and password hashes while converting the retired Superadmin role to
+Admin. A new empty cloud database can create its first Admin from private
+TRACKER_BOOTSTRAP_NAME, TRACKER_BOOTSTRAP_USERNAME, and TRACKER_BOOTSTRAP_PASSWORD
+settings. Existing accounts are never recreated by that startup command.
+
+Attachments, profile photos, holiday settings and cloud project backups retain
+the existing persistent storage integrations. Download the latest project backup
+from Administration. Keep a full database recovery dump before schema upgrades.
+
+## Checks
+
+Use a dedicated PostgreSQL database whose name ends in `_test` and run
+`php scripts/run-release-checks.php`. The tests isolate schemas and media.
+The GitHub cloud-release workflow also checks the production Docker startup.
+
+The free Render instance can sleep while idle; scheduled jobs run while it is
+awake. Existing online records stay in the cloud database and private storage.

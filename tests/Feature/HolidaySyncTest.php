@@ -44,15 +44,12 @@ class HolidaySyncTest extends TestCase
         $this->getJson('/api/holidays.php')->assertUnauthorized();
         $staff=$this->roleSession('staff');
         $this->withSession($staff)->getJson('/api/holidays.php')->assertForbidden();
+        $this->withSession($staff)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertForbidden();
         $admin=$this->roleSession('admin');
-        $this->withSession($admin)->getJson('/api/holidays.php')->assertForbidden();
-        $this->withSession($admin)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertForbidden();
-        $super=$this->roleSession('superadmin');
-        $this->withSession($super)->getJson('/api/holidays.php')->assertOk();
-        $this->withSession($super)->withHeader('X-CSRF-Token','wrong')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertStatus(419);
-        $this->withSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertOk()->assertJsonPath('state.enabled',false);
-        $this->withSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>true])->assertStatus(409);
-        $this->withSession($super)->getJson('/api/data.php')->assertForbidden();
+        $this->withSession($admin)->getJson('/api/holidays.php')->assertOk();
+        $this->withSession($admin)->withHeader('X-CSRF-Token','wrong')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertStatus(419);
+        $this->withSession($admin)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>false])->assertOk()->assertJsonPath('state.enabled',false);
+        $this->withSession($admin)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>true])->assertStatus(409);
     }
 
     public function test_manual_overrides_survive_sync_and_restore_to_source(): void
@@ -101,15 +98,38 @@ class HolidaySyncTest extends TestCase
         $this->expectException(\RuntimeException::class); TrackerHolidays::sync(true);
     }
 
-    public function test_superadmin_can_select_non_working_weekdays_and_holiday_exclusions(): void
+    public function test_a_blocked_feed_falls_back_to_explicit_national_proclamations(): void
     {
-        $super=$this->roleSession('superadmin');
-        $this->withSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>true,'nonWorkingDays'=>[0,1],'excludeHolidays'=>false])->assertOk()->assertJsonPath('calendar.nonWorkingDays',[0,1])->assertJsonPath('calendar.excludeHolidays',false);
+        \Carbon\Carbon::setTestNow('2026-11-11 12:00:00+08:00');
+        try {
+            $index = '<table><tr><td><a href="proc_9999_2026.html">Proclamation No. 9999</a><br>November 10, 2026</td><td>Declaring Monday, 16 November 2026, a Regular Holiday Throughout the Country in Observance of Eidul Fitr</td></tr>'
+                .'<tr><td><a href="proc_9998_2026.html">Proclamation No. 9998</a><br>November 9, 2026</td><td>Declaring Tuesday, 17 November 2026, a Special (Non-Working) Day in the City of Laoag</td></tr></table>';
+            $previous = '<table><tr><td><a href="proc_1006_2025.html">Proclamation No. 1006</a><br>September 3, 2025</td><td>Declaring the Regular Holidays and Special (Non-Working) Days for the Year 2026</td></tr></table>';
+            Http::fake([
+                'https://pco.gov.ph/*' => Http::response('Forbidden', 403),
+                'https://lawphil.net/executive/proc/proc2026/proc2026.html' => Http::response($index, 200),
+                'https://lawphil.net/executive/proc/proc2025/proc2025.html' => Http::response($previous, 200),
+            ]);
+            $result = TrackerHolidays::sync(true);
+            $this->assertSame('Published proclamations (Lawphil)', $result['state']['lastSource']);
+            $this->assertSame('2026-11-10', $result['state']['sourceThrough']);
+            $this->assertSame('Eid’l Fitr', $result['calendar']['years']['2026']['2026-11-16']);
+            $this->assertArrayNotHasKey('2026-11-17', $result['calendar']['years']['2026']);
+            $this->assertNull($result['state']['error']);
+        } finally {
+            \Carbon\Carbon::setTestNow();
+        }
+    }
+
+    public function test_admin_can_select_non_working_weekdays_and_holiday_exclusions(): void
+    {
+        $admin=$this->roleSession('admin');
+        $this->withSession($admin)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>0,'enabled'=>true,'nonWorkingDays'=>[0,1],'excludeHolidays'=>false])->assertOk()->assertJsonPath('calendar.nonWorkingDays',[0,1])->assertJsonPath('calendar.excludeHolidays',false);
         $this->assertTrue(TrackerMilestones::isWorkday(new \DateTimeImmutable('2026-10-03')));
         $this->assertFalse(TrackerMilestones::isWorkday(new \DateTimeImmutable('2026-10-05')));
         $this->assertTrue(TrackerMilestones::isWorkday(new \DateTimeImmutable('2026-12-25')));
         $this->assertSame('2026-10-03',TrackerMilestones::addWorkdays(new \DateTimeImmutable('2026-10-02'),1)->format('Y-m-d'));
-        $this->withSession($super)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>1,'enabled'=>true,'nonWorkingDays'=>[0,1,2,3,4,5,6],'excludeHolidays'=>true])->assertUnprocessable();
+        $this->withSession($admin)->withHeader('X-CSRF-Token','holiday-token')->postJson('/api/holidays.php',['action'=>'settings','revision'=>1,'enabled'=>true,'nonWorkingDays'=>[0,1,2,3,4,5,6],'excludeHolidays'=>true])->assertUnprocessable();
         $this->assertSame([0,1],TrackerHolidays::calendar()['nonWorkingDays']);
     }
 
@@ -124,5 +144,21 @@ class HolidaySyncTest extends TestCase
         TrackerHolidays::update(0,function ($state) { $state['overrides']['2026-10-07']=['name'=>'Added holiday','nonWorking'=>true]; return $state; });
         try { \App\Support\TrackerProjectInput::validateDates(['biddingDate'=>'2026-10-07']); $this->fail('Expected added holiday to be blocked'); }
         catch (\Illuminate\Validation\ValidationException $error) { $this->assertStringContainsString('excluded holiday',$error->errors()['biddingDate'][0]); }
+    }
+
+    public function test_manual_dates_take_priority_over_weekday_and_holiday_options(): void
+    {
+        TrackerHolidays::update(0, function ($state) {
+            $state['excludeHolidays'] = false;
+            $state['overrides'] = [
+                '2026-11-13' => ['name' => 'Manual closure', 'nonWorking' => true],
+                '2026-11-14' => ['name' => 'Working Saturday', 'nonWorking' => false],
+            ];
+            return $state;
+        });
+        $this->assertFalse(TrackerMilestones::isWorkday(new \DateTimeImmutable('2026-11-13')));
+        $this->assertTrue(TrackerMilestones::isWorkday(new \DateTimeImmutable('2026-11-14')));
+        $this->assertSame('2026-11-14', TrackerMilestones::addWorkdays(new \DateTimeImmutable('2026-11-12'), 1)->format('Y-m-d'));
+        \App\Support\TrackerProjectInput::validateDates(['biddingDate' => '2026-11-14']);
     }
 }

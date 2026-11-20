@@ -37,7 +37,7 @@ class AuditRegressionTest extends ComprehensiveUatTest
     }
     public function test_invalid_column_types_and_amounts_return_validation_errors(): void {
         $record=$this->imported();
-        foreach ([['title'=>['nested']],['title'=>str_repeat('x',256)],['approvedBudget'=>'10000000000000'],['bidAmount'=>'not money']] as $bad) {
+        foreach ([['title'=>['nested']],['title'=>str_repeat('x',401)],['approvedBudget'=>'10000000000000'],['bidAmount'=>'not money']] as $bad) {
             $this->requestData(['action'=>'saveProject','record'=>array_replace($record,$bad)])->assertStatus(422)->assertJsonPath('ok',false);
         }
         $this->assertSame('0',\App\Http\Controllers\TrackerDataController::projectColumns(['projectNo'=>'0'])['project_no']);

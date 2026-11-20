@@ -44,7 +44,7 @@ final class TrackerSession
         if ($now >= $session->started_at + self::MAX_SECONDS) {
             return ['reason' => 'session_expired', 'message' => 'Your eight-hour session has ended. Please sign in again.'];
         }
-        if ($account->role !== 'superadmin' && $now >= $session->last_activity_at + self::IDLE_SECONDS) {
+        if ($now >= $session->last_activity_at + self::IDLE_SECONDS) {
             return ['reason' => 'session_idle', 'message' => 'You were signed out after 30 minutes of inactivity. Please sign in again.'];
         }
         return null;
@@ -74,7 +74,7 @@ final class TrackerSession
         return [
             'serverNow' => now()->getTimestamp(),
             'expiresAt' => $session ? $session->started_at + self::MAX_SECONDS : null,
-            'idleExpiresAt' => $session && $account->role !== 'superadmin' ? $session->last_activity_at + self::IDLE_SECONDS : null,
+            'idleExpiresAt' => $session ? $session->last_activity_at + self::IDLE_SECONDS : null,
         ];
     }
 }

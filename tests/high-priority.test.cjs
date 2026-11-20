@@ -14,25 +14,28 @@ context.FileReader = class {
 };
 context.XLSX = {
     read() { return { SheetNames: ['Projects'], Sheets: { Projects: {} } }; },
-    utils: { sheet_to_json() { return context.rows; } }
+    utils: { decode_range(){return {s:{c:0,r:0},e:{c:-1,r:0}};}, sheet_to_json() { return context.rows; } }
 };
 
 vm.runInContext(fs.readFileSync(path.join(root, 'public/js/db.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(path.join(root, 'public/js/project-fields.js'), 'utf8'), context);
+vm.runInContext(fs.readFileSync(path.join(root, 'public/js/project-revision.js'), 'utf8'), context);
 vm.runInContext(fs.readFileSync(path.join(root, 'public/js/excel.js'), 'utf8'), context);
 
 async function main() {
     context.currentUser = { role: 'staff', canImport: true };
     context.captured = null;
-    vm.runInContext('showImportPreview = (rows, isLd) => { captured = { rows, isLd }; }', context);
+    vm.runInContext('showImportPreview = rows => { captured = rows; }', context);
     context.rows = [{ 'Project No.': '42', 'Project Title': 'Road repair', 'Operational Status': 'Completed', 'Completion Date': '2025-01-02', 'LD Amount': '50' }];
     vm.runInContext('handleExcelImport({ target: { files: [{}], value: "chosen.csv" } })', context);
-    assert.equal(context.captured.isLd, false);
-    assert.equal(context.captured.rows[0].title, 'Road repair');
-    assert.equal(context.captured.rows[0].status, 'Completed');
-    assert.equal(context.captured.rows[0].completion, '2025-01-02');
+    assert.equal(context.captured[0].title, 'Road repair');
+    assert.equal(context.captured[0].status, 'Completed');
+    assert.equal(context.captured[0].completion, '2025-01-02');
+    assert.equal(context.captured[0].ldAmount, '50');
     context.rows = [{ 'Project No.': '43', '2. Project Title': 'Bridge', '23. LD Amount': '75' }];
     vm.runInContext('handleExcelImport({ target: { files: [{}], value: "chosen.xlsx" } })', context);
-    assert.equal(context.captured.isLd, false);
+    assert.equal(context.captured[0].title, 'Bridge');
+    assert.equal(context.captured[0].ldAmount, '75');
 
     context.failedPost = () => Promise.reject(new Error('server rejected write'));
     vm.runInContext('apiClient.post = failedPost', context);

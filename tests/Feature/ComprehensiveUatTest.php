@@ -163,7 +163,7 @@ class ComprehensiveUatTest extends TestCase
         $this->postData(['action' => 'saveProject', 'record' => ['title' => 'UAT', 'biddingDate' => '2026-09-29']])->assertStatus(422)->assertJsonPath('message', 'Approved Budget is required and must be a non-negative amount with at most two decimal places.');
         $this->postData(['action' => 'saveProject', 'record' => ['title' => 'UAT', 'biddingDate' => '2026-09-29', 'approvedBudget' => '-1']])->assertStatus(422);
         $this->postData(['action' => 'saveProject', 'record' => ['title' => 'UAT', 'biddingDate' => '2026-09-29', 'approvedBudget' => '100']])->assertOk();
-        $saved = $this->postData(['action' => 'saveProject', 'record' => ['title' => 'Inspection UAT', 'status' => 'Final-inspection', 'finalInspection' => '2026-09-29', 'biddingDate' => '2026-09-01', 'approvedBudget' => '1,250.50', 'winningBidder' => 'Builder']])->assertOk()->json('record');
+        $saved = $this->postData(['action' => 'saveProject', 'record' => ['title' => 'Inspection UAT', 'status' => 'Final-inspection', 'preInspection' => '2026-09-28', 'finalInspection' => '2026-09-29', 'biddingDate' => '2026-09-01', 'approvedBudget' => '1,250.50', 'winningBidder' => 'Builder']])->assertOk()->json('record');
         $this->assertEqualsWithDelta(1250.50, (float) DB::table('projects')->where('id', $saved['id'])->value('approved_budget'), 0.001);
         $this->withSession($this->session)->getJson('/api/data.php?action=dashboard&year=2026&month=9')->assertOk()->assertJsonPath('statusCounts.Pending', 1);
         DB::table('users')->where('id',1)->update(['role'=>'admin']);
@@ -176,14 +176,14 @@ class ComprehensiveUatTest extends TestCase
         $batch = 'uat_import_batch_01';
         $this->postData(['action' => 'bulkSaveProjects', 'batchId' => $batch, 'archive' => true, 'records' => [
             ['projectNo' => '9901', 'title' => 'Historic bridge', 'status' => 'Completed', 'completion' => '', 'remarks' => 'Brgy. 2'],
-            ['projectNo' => '9902', 'title' => 'Historic road', 'status' => 'Released', 'completion' => '2026-02-02'],
+            ['projectNo' => '9902', 'title' => 'Historic road', 'status' => 'Released', 'preInspection' => '2026-01-29', 'finalInspection' => '2026-01-30', 'completion' => '2026-02-02'],
         ]])->assertOk()->assertJsonPath('count', 2);
         $this->withSession($this->session)->getJson('/api/data.php?action=listProjects&lifecycle=archived&status=Completed')->assertOk()->assertJsonPath('totalRecords', 1);
         $response = $this->withSession($this->session)->get('/api/data.php?action=listProjects&lifecycle=archived&format=csv');
         $response->assertOk()->assertHeader('content-type', 'text/csv; charset=utf-8');
         $csv = $response->streamedContent();
         $header = str_getcsv(ltrim(strtok($csv, "\n"), "\xEF\xBB\xBF"));
-        $this->assertSame(['Project No.', 'Date of Bidding', 'Project Title'], array_slice($header, 0, 3));
+        $this->assertSame(['Project No.', 'Reference #', 'Project Title'], array_slice($header, 0, 3));
         $this->assertStringContainsString('Historic bridge', $csv);
         $this->assertStringContainsString('Historic road', $csv);
         $this->postData(['action' => 'rollbackImport', 'batchId' => $batch])->assertStatus(422);

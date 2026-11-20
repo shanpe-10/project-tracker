@@ -21,7 +21,7 @@
         rel="stylesheet"
     >
 
-    <link rel="stylesheet" href="css/styles.css?v=20261030-role-guides">
+    <link rel="stylesheet" href="css/styles.css?v=20261118-trash-icon">
 </head>
 
 
@@ -42,6 +42,20 @@
             <div class="mb-2">
                 <label for="loginPassword" class="form-label">Password</label>
                 <input id="loginPassword" type="password" class="form-control" autocomplete="current-password" required>
+            </div>
+            <div id="initialAdminSetup" class="d-none mt-3">
+                <div class="mb-3">
+                    <label for="initialAdminCode" class="form-label">One-time setup code</label>
+                    <input id="initialAdminCode" class="form-control" autocomplete="off" autocapitalize="characters" maxlength="19">
+                </div>
+                <div class="mb-3">
+                    <label for="initialAdminPassword" class="form-label">New Admin password</label>
+                    <input id="initialAdminPassword" type="password" class="form-control" autocomplete="new-password" minlength="12">
+                </div>
+                <div class="mb-2">
+                    <label for="initialAdminConfirmation" class="form-label">Confirm new password</label>
+                    <input id="initialAdminConfirmation" type="password" class="form-control" autocomplete="new-password" minlength="12">
+                </div>
             </div>
             <p id="loginError" class="text-danger small min-vh-0 mb-3"></p>
             <button class="btn btn-primary w-100" type="submit">Sign in</button>
@@ -253,21 +267,19 @@
             </button>
 
 
-            <button
-                type="button"
-                class="nav-link" data-project-navigation
-                onclick="openAllProjects()"
-            >
-                <span class="sidebar-nav-icon" aria-hidden="true">▤</span>
-                <span>View All Projects</span>
-            </button>
-
-
-            <button type="button" class="nav-link" data-project-navigation id="historicalArchiveTabBtn" onclick="switchWorkspace('archive')">
-                <span class="sidebar-nav-icon" aria-hidden="true">▣</span>
-                <span>Historical Archive</span>
-            </button>
-
+            <div class="sidebar-nav-group">
+                <button type="button" class="nav-link" data-project-navigation onclick="openAllProjects()">
+                    <span class="sidebar-nav-icon" aria-hidden="true">▤</span>
+                    <span>View All Projects</span>
+                </button>
+                <div class="sidebar-nav-children" id="projectLifecycleViews" role="group" aria-label="Project views">
+                    <button type="button" class="nav-link" data-project-navigation data-project-lifecycle="active" aria-pressed="false" onclick="setProjectLifecycle('active')">Active projects</button>
+                    <button type="button" class="nav-link" data-project-navigation data-project-lifecycle="completed" aria-pressed="false" onclick="setProjectLifecycle('completed')">Completed projects</button>
+                    <button type="button" class="nav-link" data-project-navigation data-project-lifecycle="released" aria-pressed="false" onclick="setProjectLifecycle('released')">Released projects</button>
+                    <button type="button" class="nav-link" data-project-navigation data-project-lifecycle="alerts" aria-pressed="false" onclick="setProjectLifecycle('alerts')">Active alerts</button>
+                    <button type="button" class="nav-link" data-project-navigation data-project-lifecycle="all" aria-pressed="false" onclick="setProjectLifecycle('all')">All projects</button>
+                </div>
+            </div>
 
             <button
                 type="button"
@@ -278,21 +290,23 @@
                 <span>Resolved Alerts</span>
             </button>
 
-            <button type="button" class="nav-link d-none" id="deletionRequestsNav" data-project-navigation onclick="openDeletionRequests()">
-                <span class="sidebar-nav-icon" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6"/></svg></span>
-                <span>Deletion requests</span>
-                <span id="deletionRequestsBadge" class="badge bg-warning text-dark ms-auto" hidden>0</span>
-            </button>
+            <div id="staffDeletionNavigation" class="d-none"></div>
 
-            <button
-                type="button"
-                class="nav-link d-none"
-                id="accountRequestsTabBtn"
-                onclick="switchWorkspace('account-requests')"
-            >
-                <span class="sidebar-nav-icon" aria-hidden="true">◌</span>
-                <span>Admin</span>
-            </button>
+            <div id="administrationNavigation" class="sidebar-nav-group d-none">
+                <button type="button" class="nav-link" id="administrationTabBtn" onclick="switchWorkspace('administration')">
+                    <span class="sidebar-nav-icon" aria-hidden="true">◌</span>
+                    <span>Administration</span>
+                </button>
+                <div class="sidebar-nav-children" id="administrationLinks">
+                    <button type="button" class="nav-link" id="accountRequestsTabBtn" onclick="switchWorkspace('account-requests')">Account Creation</button>
+                    <button type="button" class="nav-link" id="accountabilityTabBtn" onclick="switchWorkspace('accountability')">Accountability</button>
+                    <button type="button" class="nav-link" data-project-navigation id="historicalArchiveTabBtn" onclick="switchWorkspace('archive')">Historical Archive</button>
+                    <button type="button" class="nav-link" id="deletionRequestsNav" data-project-navigation onclick="openDeletionRequests()">
+                        <span>Deletion Requests</span>
+                        <span id="deletionRequestsBadge" class="badge bg-warning text-dark ms-auto" hidden>0</span>
+                    </button>
+                </div>
+            </div>
 
             <button type="button" class="nav-link" data-bs-toggle="modal" data-bs-target="#systemGuideModal">
                 <span class="sidebar-nav-icon" aria-hidden="true">?</span>
@@ -361,30 +375,10 @@
                     style="display: none;"
                 >
 
-                    <!-- PAGE HEADER -->
                     <div class="dashboard-page-header">
-
-                        <div>
-
-                            <div class="dashboard-eyebrow">
-                                Overview
-                            </div>
-
-                            <h1 class="dashboard-title">
-                                Dashboard
-                            </h1>
-
-                            <p class="dashboard-description">
-                                Monitor project activity, completion status,
-                                and upcoming procurement timeline requirements.
-                            </p>
-
-                            <p id="dashboardLastUpdated" class="dashboard-last-updated" aria-live="polite">Last updated: —</p>
-
-                        </div>
-
+                        <h1 class="dashboard-title">Statistics</h1>
+                        <p id="dashboardLastUpdated" class="dashboard-last-updated" aria-live="polite">Last updated: —</p>
                     </div>
-
 
                     <!-- DASHBOARD METRICS -->
                     <div class="dashboard-metrics-grid">
@@ -530,17 +524,6 @@
                     </section>
 
 
-                    <section class="dashboard-recent-card" aria-labelledby="recentProjectsTitle">
-                        <div class="dashboard-chart-header">
-                            <h2 id="recentProjectsTitle">Recently updated projects</h2>
-                            <p>Latest saved changes across the registry</p>
-                        </div>
-                        <ul id="dashboardRecentProjects" class="dashboard-recent-list">
-                            <li class="dashboard-recent-empty">Loading recent activity…</li>
-                        </ul>
-                    </section>
-
-
                     <!-- TIMELINE ALERTS -->
                     <section
                         id="dashboardTimelineBlock"
@@ -598,6 +581,16 @@
 
                         <div id="dashboardAlertPagination" class="dashboard-alert-pagination d-none"></div>
 
+                    </section>
+
+                    <section class="dashboard-recent-card" aria-labelledby="recentProjectsTitle">
+                        <div class="dashboard-chart-header">
+                            <h2 id="recentProjectsTitle">Recently updated projects</h2>
+                            <p>Latest saved changes across the registry</p>
+                        </div>
+                        <ul id="dashboardRecentProjects" class="dashboard-recent-list">
+                            <li class="dashboard-recent-empty">Loading recent activity…</li>
+                        </ul>
                     </section>
 
                 </div>
@@ -1006,6 +999,7 @@ ADD / EDIT PROJECT
                                     Next expected Project Number:
                                     <strong id="nextProjectNumberValue">—</strong>
                                     <span class="text-muted">(confirmed when saved)</span>
+                                    <span id="nextProjectNumberContext" class="d-block text-muted"></span>
                                 </p>
 
                             </div>
@@ -1018,890 +1012,22 @@ ADD / EDIT PROJECT
                         </div>
 
 
+                        <div id="projectFormTabs" class="nav nav-tabs project-form-tabs d-none" role="tablist" aria-label="Edit Project sections">
+                            @foreach (array_column(\App\Support\TrackerProjectFields::sections(), 'label', 'id') as $section => $label)
+                                <button type="button" id="project-tab-{{ $section }}" class="nav-link{{ $loop->first ? ' active' : '' }}"
+                                    data-bs-toggle="tab" data-bs-target="#project-panel-{{ $section }}" role="tab"
+                                    aria-controls="project-panel-{{ $section }}" aria-selected="{{ $loop->first ? 'true' : 'false' }}">{{ $label }}</button>
+                            @endforeach
+                        </div>
+
                         <form
                             id="documentForm"
                             onsubmit="event.preventDefault(); saveDocument();"
                         >
-
-
-                            <!-- BASIC INFORMATION -->
-                            <section class="form-section-card">
-
-                                <div class="form-section-header">
-
-                                    <div class="form-section-number">
-                                        01
-                                    </div>
-
-                                    <div>
-
-                                        <h2 class="form-section-title">
-                                            Basic Project Information
-                                        </h2>
-
-                                        <p class="form-section-description">
-                                            Core project, budget, and funding details.
-                                        </p>
-
-                                    </div>
-
-                                </div>
-
-
-                                <div class="form-section-body">
-
-                                    <div class="row g-3">
-
-
-                                        
-
-
-                                        <div class="col-12">
-
-                                            <label
-                                                for="title"
-                                                class="form-label"
-                                            >
-                                                Project Title
-                                                <span class="text-danger">*</span>
-                                            </label>
-
-                                            <textarea
-                                                id="title"
-                                                class="form-control auto-expand"
-                                                rows="1"
-                                                placeholder="e.g., Residential Building at Brgy. 1"
-                                                aria-describedby="project-title-help"
-                                            ></textarea>
-                                            <div id="project-title-help" class="form-text text-muted">Use the project name followed by its location. Example: Residential Building at Brgy. 1.</div>
-
-                                        </div>
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="approvedBudget"
-                                                class="form-label"
-                                            >
-                                                Approved Budget for the Contract
-                                                <span class="text-danger">*</span>
-                                            </label>
-
-                                            <input
-                                                type="text"
-                                                id="approvedBudget"
-                                                class="form-control"
-                                                placeholder="₱0.00"
-                                            >
-
-                                        </div>
-
-
-                                        
-
-
-                                        
-
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="sourceOfFund"
-                                                class="form-label"
-                                            >
-                                                Source of Fund
-                                            </label>
-
-                                            <select
-                                                id="sourceOfFund"
-                                                class="form-select"
-                                            >
-
-                                                <option value="">
-                                                    Select fund source
-                                                </option>
-
-                                                <option value="Others">
-                                                    Others
-                                                </option>
-
-                                                <option value="Brgy Fund">
-                                                    Barangay Fund
-                                                </option>
-
-                                                <option value="City Fund">
-                                                    City Fund
-                                                </option>
-
-                                            </select>
-
-                                        </div>
-
-
-                                        <div
-                                            class="col-md-6 d-none"
-                                            id="sourceOfFundCustomRow"
-                                        >
-
-                                            <label
-                                                for="sourceOfFundCustom"
-                                                class="form-label"
-                                            >
-                                                Specify Other Fund Source
-                                            </label>
-
-                                            <input
-                                                type="text"
-                                                id="sourceOfFundCustom"
-                                                class="form-control"
-                                                placeholder="Enter source of fund"
-                                            >
-
-                                        </div>
-
-                                    </div>
-
-                                </div>
-
-                            </section>
-
-
-                            <!-- PROCUREMENT -->
-                            <section class="form-section-card">
-
-                                <div class="form-section-header">
-
-                                    <div class="form-section-number">
-                                        02
-                                    </div>
-
-                                    <div>
-
-                                        <h2 class="form-section-title">
-                                            Procurement and Award
-                                        </h2>
-
-                                        <p class="form-section-description">
-                                            Bidding, bidder, procurement request, resolution,
-                                            qualification, and award milestones.
-                                        </p>
-
-                                    </div>
-
-                                </div>
-
-
-                                <div class="form-section-body">
-
-                                    <div class="row g-3">
-
-<div class="col-md-4">
-
-                                            <label
-                                                for="biddingDate"
-                                                class="form-label"
-                                            >
-                                                Date of Bidding
-                                                <span class="text-danger">*</span>
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="biddingDate"
-                                                class="form-control"
-                                            >
-
-                                        </div>
-
-<div class="col-md-4">
-
-                                            <label
-                                                for="bidAmount"
-                                                class="form-label"
-                                            >
-                                                Bid Amount
-                                            </label>
-
-                                            <input
-                                                type="text"
-                                                id="bidAmount"
-                                                class="form-control"
-                                                placeholder="₱0.00"
-                                            >
-
-                                        </div>
-
-<div class="col-md-4">
-
-                                            <label
-                                                for="winningBidder"
-                                                class="form-label"
-                                            >
-                                                Winning Bidder
-                                                
-                                            </label>
-
-                                            <input
-                                                type="text"
-                                                id="winningBidder"
-                                                class="form-control"
-                                                placeholder="Contractor or supplier (optional — add later)"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="prNumber"
-                                                class="form-label"
-                                            >
-                                                Purchase Request Number
-                                            </label>
-
-                                            <input
-                                                type="text"
-                                                id="prNumber"
-                                                class="form-control"
-                                                placeholder="Purchase Request Number"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="prDate"
-                                                class="form-label"
-                                            >
-                                                Purchase Request Date
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="prDate"
-                                                class="form-control"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="obre"
-                                                class="form-label"
-                                            >
-                                                Obligation Request Date
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="obre"
-                                                class="form-control"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="resolutionNumber"
-                                                class="form-label"
-                                            >
-                                                Resolution Number
-                                            </label>
-
-                                            <input
-                                                type="text"
-                                                id="resolutionNumber"
-                                                class="form-control"
-                                                placeholder="Resolution Number"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="resolutionDate"
-                                                class="form-label"
-                                            >
-                                                Resolution Date
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="resolutionDate"
-                                                class="form-control"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="noticePostQual"
-                                                class="form-label"
-                                            >
-                                                Notice of Post Qualification
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="noticePostQual"
-                                                class="form-control"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-6">
-                                            <label for="noaDueDate" class="form-label">NOA Due Date</label>
-                                            <input type="date" id="noaDueDate" class="form-control" aria-describedby="noaDueDateHint">
-                                            <div id="noaDueDateHint" class="form-helper">Deadline for issuing the Notice of Award. Alerts remain overdue until the issuance date is recorded.</div>
-                                        </div>
-                                        <div class="col-md-6">
-
-                                            <label
-                                                for="noa"
-                                                class="form-label"
-                                            >
-                                                NOA Issued Date
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="noa"
-                                                class="form-control"
-                                            >
-
-                                            <div class="form-helper">
-                                                Record the actual issuance date to resolve NOA alerts.
-                                            </div>
-
-                                        </div>
-
-
-                                        <div class="col-md-6">
-
-                                            <label
-                                                for="performanceBond"
-                                                class="form-label"
-                                            >
-                                                Performance Bond
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="performanceBond"
-                                                class="form-control"
-                                            >
-
-                                        </div>
-
-                                    </div>
-
-                                </div>
-
-                            </section>
-
-
-                            <!-- CONTRACT -->
-                            <section class="form-section-card">
-
-                                <div class="form-section-header">
-
-                                    <div class="form-section-number">
-                                        03
-                                    </div>
-
-                                    <div>
-
-                                        <h2 class="form-section-title">
-                                            Contract and Implementation
-                                        </h2>
-
-                                        <p class="form-section-description">
-                                            Contract execution, notice to proceed,
-                                            duration, and implementation dates.
-                                        </p>
-
-                                    </div>
-
-                                </div>
-
-
-                                <div class="form-section-body">
-
-                                    <div class="row g-3">
-
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="contractRef"
-                                                class="form-label"
-                                            >
-                                                Contract Date
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="contractRef"
-                                                class="form-control"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="contractDuration"
-                                                class="form-label"
-                                            >
-                                                Contract Duration (working days)
-                                            </label>
-
-                                            <input
-                                                type="number" min="0.000001" max="36500" step="any" inputmode="decimal"
-                                                id="contractDuration"
-                                                class="form-control"
-                                                placeholder="Calendar days (e.g. 30 or 30.5)"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-4">
-
-                                            <label
-                                                for="contractEndDate"
-                                                class="form-label"
-                                            >
-                                                Contract Due Date
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="contractEndDate"
-                                                class="form-control"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-6">
-
-                                            <label
-                                                for="ntpDate"
-                                                class="form-label"
-                                            >
-                                                Notice to Proceed
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="ntpDate"
-                                                class="form-control"
-                                             aria-describedby="ntpDateHelp">
-                                            <div id="ntpDateHelp" class="form-helper">Record the actual issuance date to resolve NTP alerts.</div>
-
-                                        </div>
-
-
-                                        <div class="col-md-6">
-
-                                            <label
-                                                for="dole"
-                                                class="form-label"
-                                            >
-                                                Department of Labor and Employment Clearance
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="dole"
-                                                class="form-control"
-                                            >
-
-                                        </div>
-
-                                    </div>
-
-                                </div>
-
-                            </section>
-
-
-                            <!-- INSPECTION -->
-                            <section class="form-section-card">
-
-                                <div class="form-section-header">
-
-                                    <div class="form-section-number">
-                                        04
-                                    </div>
-
-                                    <div>
-
-                                        <h2 class="form-section-title">
-                                            Inspection and Completion
-                                        </h2>
-
-                                        <p class="form-section-description">
-                                            Inspection milestones and
-                                            final project status.
-                                        </p>
-
-                                    </div>
-
-                                </div>
-
-
-                                <div class="form-section-body">
-
-                                    <div class="row g-3">
-
-
-                                        <div class="col-12">
-                                            <div class="milestone-due-summary">
-                                                <div class="milestone-due-heading">Due dates</div>
-                                                <div class="milestone-due-grid">
-                                                    <div><label for="preInspectionDueDate" class="form-label">Pre-inspection</label><input type="date" id="preInspectionDueDate" class="form-control" readonly></div>
-                                                    <div><label for="ntpDueDate" class="form-label">Notice to Proceed</label><input type="date" id="ntpDueDate" class="form-control" readonly></div>
-                                                    <div><label for="materialTestingDueDate" class="form-label">Material testing</label><input type="date" id="materialTestingDueDate" class="form-control" readonly></div>
-                                                    <div><label for="finalInspectionDueDate" class="form-label">Final inspection</label><input type="date" id="finalInspectionDueDate" class="form-control" readonly></div>
-                                                    <div><label for="swaDueDate" class="form-label">SWA</label><input type="date" id="swaDueDate" class="form-control" readonly aria-describedby="swaDueDateHint"></div>
-                                                </div>
-                                                <p class="milestone-due-note">Pre-inspection, NTP and material testing: one calendar month after bidding, moved to the next working day if it falls on a weekend or Philippine non-working holiday. Final inspection: contract end, including extensions. <span id="swaDueDateHint">SWA: one year after completion.</span> Durations and reminder lead times follow the working-day calendar selected by Superadmin. Declared national holidays sync automatically when online. Superadmin can add local holidays and corrections under Philippine holidays. Record actual dates below.</p>
-                                            </div>
-                                        </div>
-
-                                        <div class="col-md-3">
-                                            <label for="materialTestingDate" class="form-label">Material Testing Date</label>
-                                            <input type="date" id="materialTestingDate" class="form-control" aria-describedby="materialTestingDateHelp">
-                                            <div id="materialTestingDateHelp" class="form-helper">Record the actual testing date to resolve material testing alerts.</div>
-                                        </div>
-                                        <div class="col-md-3">
-
-                                            <label
-                                                for="preInspection"
-                                                class="form-label"
-                                            >
-                                                Pre Inspection
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="preInspection"
-                                                class="form-control"
-                                             aria-describedby="preInspectionHelp">
-                                            <div id="preInspectionHelp" class="form-helper">Record the actual inspection date to resolve pre-inspection alerts.</div>
-
-                                        </div>
-
-
-                                        <div class="col-md-3">
-
-                                            <label
-                                                for="finalInspection"
-                                                class="form-label"
-                                            >
-                                                Final Inspection
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="finalInspection"
-                                                class="form-control"
-                                             aria-describedby="finalInspectionHelp">
-                                            <div id="finalInspectionHelp" class="form-helper">Record the actual inspection date. It sets the status to Pending unless the project is Completed or Released. Matching alerts resolve when the recorded date is reached.</div>
-
-                                        </div>
-
-
-                                        <div class="col-md-3">
-
-                                            <label
-                                                for="swa"
-                                                class="form-label"
-                                            >
-                                                Statement of Work Accomplished Date
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="swa"
-                                                class="form-control"
-                                             aria-describedby="swaHelp">
-                                            <div id="swaHelp" class="form-helper">Record the actual SWA date to resolve SWA alerts.</div>
-
-                                        </div>
-
-
-                                        <div class="col-md-6">
-
-                                            <label
-                                                for="completionDate"
-                                                class="form-label"
-                                            >
-                                                Completion Date
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="completionDate"
-                                                class="form-control"
-                                             aria-describedby="completionDateHelp">
-                                            <div id="completionDateHelp" class="form-helper">Record the actual project completion date to track completion and calculate the SWA due date.</div>
-
-                                            <div id="completionDateHint" class="form-text text-danger fw-semibold d-none">
-                                                Completion Date is required for completed projects to appear in Monthly Completions.
-                                            </div>
-
-                                        </div>
-
-
-                                        <div class="col-md-6">
-
-                                            <label
-                                                for="status"
-                                                class="form-label"
-                                            >
-                                                Operational Status
-                                            </label>
-
-                                            <select
-                                                id="status"
-                                                class="form-select"
-                                            >
-
-                                                <option value="Pending">
-                                                    Pending
-                                                </option>
-
-                                                <option value="On-going Bidding">
-                                                    On-going Bidding
-                                                </option>
-
-                                                <option value="Pre-inspection">
-                                                    Pre-inspection
-                                                </option>
-
-                                                <option value="Final-inspection">
-                                                    Final-inspection
-                                                </option>
-
-                                                <option value="Completed">
-                                                    Completed
-                                                </option>
-
-                                                <option value="Released">
-                                                    Released
-                                                </option>
-
-                                            </select>
-
-                                        </div>
-
-                                    </div>
-
-                                </div>
-
-                            </section>
-
-
-                            <!-- LD -->
-                            <section class="form-section-card">
-
-                                <div class="form-section-header">
-
-                                    <div class="form-section-number">
-                                        05
-                                    </div>
-
-                                    <div>
-
-                                        <h2 class="form-section-title">
-                                            Liquidated Damages
-                                        </h2>
-
-                                        <p class="form-section-description">
-                                            Complete only when liquidated damages
-                                            apply to the project.
-                                        </p>
-
-                                    </div>
-
-                                </div>
-
-
-                                <div class="form-section-body">
-
-                                    <div class="row g-3">
-
-
-                                        <div class="col-md-3">
-
-                                            <label
-                                                for="ldAmount"
-                                                class="form-label"
-                                            >
-                                                Liquidated Damages Amount
-                                            </label>
-
-                                            <input
-                                                type="text"
-                                                id="ldAmount"
-                                                class="form-control"
-                                                placeholder="₱0.00"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-3">
-
-                                            <label
-                                                for="ldNoOfDays"
-                                                class="form-label"
-                                            >
-                                                Liquidated Damages Number of Days
-                                            </label>
-
-                                            <input
-                                                type="number"
-                                                id="ldNoOfDays"
-                                                min="0"
-                                                max="36500"
-                                                step="any"
-                                                class="form-control"
-                                                placeholder="0"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-3">
-
-                                            <label
-                                                for="ldNewCompletionDate"
-                                                class="form-label"
-                                            >
-                                                Revised Completion Date After Liquidated Damages
-                                            </label>
-
-                                            <input
-                                                type="date"
-                                                id="ldNewCompletionDate"
-                                                class="form-control"
-                                            >
-
-                                        </div>
-
-
-                                        <div class="col-md-3">
-
-                                            <label
-                                                for="ldActualDuration"
-                                                class="form-label"
-                                            >
-                                                Actual Duration After Liquidated Damages
-                                            </label>
-
-                                            <input
-                                                type="text"
-                                                id="ldActualDuration"
-                                                class="form-control"
-                                                placeholder="Duration used"
-                                            >
-
-                                        </div>
-
-                                    </div>
-
-                                </div>
-
-                            </section>
-
-
-                            <!-- REMARKS -->
-                            <section class="form-section-card">
-
-                                <div class="form-section-header">
-
-                                    <div class="form-section-number">
-                                        06
-                                    </div>
-
-                                    <div>
-
-                                        <h2 class="form-section-title">
-                                            Remarks
-                                        </h2>
-
-                                        <p class="form-section-description">
-                                            Optional notes or additional
-                                            project information.
-                                        </p>
-
-                                    </div>
-
-                                </div>
-
-
-                                <div class="form-section-body">
-
-                                    <label
-                                        for="remarks"
-                                        class="form-label"
-                                    >
-                                        Additional Remarks
-                                    </label>
-
-                                    <textarea
-                                        id="remarks"
-                                        class="form-control"
-                                        rows="4"
-                                        placeholder="Enter notes, observations, or additional information..."
-                                    ></textarea>
-
-                                </div>
-
-                            </section>
-
-
-                            <!-- ATTACHMENTS -->
-                            <section class="form-section-card" aria-labelledby="attachmentsTitle">
-                                <div class="form-section-header">
-                                    <div class="form-section-number">07</div>
-                                    <div>
-                                        <h2 id="attachmentsTitle" class="form-section-title">Project Attachments</h2>
-                                        <p class="form-section-description">Attach notices, contracts, photos, and inspection files to this project.</p>
-                                    </div>
-                                </div>
-                                <div class="form-section-body">
-                                    <div id="projectAttachmentsNewNotice" class="alert alert-light border mb-3">Save the project first, then edit it to attach files.</div>
-                                    <div id="projectAttachmentsEditor" class="d-none">
-                                        <label class="form-label" for="projectAttachmentFiles">Choose files</label>
-                                        <div class="mb-2">
-                                            <input id="projectAttachmentFiles" class="form-control" type="file" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.txt,image/jpeg,image/png,image/gif,image/webp" onchange="uploadProjectAttachments()">
-                                        </div>
-                                        <div class="form-text mb-3">PDF, Word, Excel, text, and image files; up to 25 MB each. Added or removed files are saved only when you select Apply Records Change.</div>
-                                        <div id="projectAttachmentsList" class="list-group" aria-live="polite"></div>
-                                    </div>
-                                </div>
-                            </section>
-
-
-                        </form>
+                            <div id="projectFormPanels">
+ @include('project-form-sections')
+ </div>
+ </form>
 
                             <!-- FORM ACTIONS -->
                             <div class="project-form-actions">
@@ -1985,15 +1111,6 @@ ADD / EDIT PROJECT
                                 + Add Project
                             </button>
 
-                        </div>
-
-
-                        <div class="projects-lifecycle-tabs" id="projectsLifecycleTabs" role="group" aria-label="Project lifecycle view">
-                            <button type="button" id="projectLifecycleActive" class="active" onclick="setProjectLifecycle('active')">Active projects</button>
-                            <button type="button" id="projectLifecycleCompleted" onclick="setProjectLifecycle('completed')">Completed projects</button>
-                            <button type="button" id="projectLifecycleReleased" onclick="setProjectLifecycle('released')">Released projects</button>
-                            <button type="button" id="projectLifecycleAlerts" onclick="setProjectLifecycle('alerts')">Active alerts</button>
-                            <button type="button" id="projectLifecycleAll" onclick="setProjectLifecycle('all')">All projects</button>
                         </div>
 
 
@@ -2251,23 +1368,35 @@ ADD / EDIT PROJECT
 
                             <div class="table-responsive projects-table-wrapper">
 
-                                <table class="table projects-table align-middle mb-0">
+                                <table class="table projects-table mb-0">
+                                    <colgroup>
+                                        <col class="project-record-number">
+                                        <col class="project-record-reference">
+                                        <col>
+                                        <col class="project-record-date">
+                                        <col class="project-record-date">
+                                        <col>
+                                        <col class="project-record-date">
+                                        <col class="project-record-status">
+                                        <col class="project-record-actions">
+                                    </colgroup>
 
                                     <thead>
 
                                         <tr>
                                             <th scope="col" aria-sort="ascending">
-                                                <button id="projectNumberSortButton" type="button" class="btn btn-link p-0 text-decoration-none text-reset fw-semibold" onclick="toggleProjectNumberSort()" aria-label="Sort project numbers ascending">
+                                                <button id="projectNumberSortButton" type="button" class="btn btn-link p-0 text-decoration-none text-reset border-0 project-number-sort" onclick="toggleProjectNumberSort()" aria-label="Sort project numbers ascending">
                                                     No. <span id="projectNumberSortIcon" aria-hidden="true">↑</span>
                                                 </button>
                                             </th>
-                                            <th>Project</th>
-                                            <th>Bidding Date</th>
-                                            <th>NOA Due Date</th>
-                                            <th>Timeline</th>
-                                            <th>Completion</th>
-                                            <th>Status</th>
-                                            <th>Actions</th>
+                                            <th scope="col">Ref. No.</th>
+                                            <th scope="col">Project</th>
+                                            <th scope="col">Bidding Date</th>
+                                            <th scope="col">NOA Due Date</th>
+                                            <th scope="col">Timeline</th>
+                                            <th scope="col">Completion</th>
+                                            <th scope="col">Status</th>
+                                            <th scope="col">Actions</th>
                                         </tr>
 
                                     </thead>
@@ -2297,7 +1426,7 @@ ADD / EDIT PROJECT
 
 
                         <!-- DATA MANAGEMENT -->
-                        <section class="projects-danger-zone">
+                        <section class="projects-danger-zone d-none" id="deleteAllRecordsZone" hidden>
 
                             <div>
 
@@ -2319,7 +1448,7 @@ ADD / EDIT PROJECT
                                 onclick="promptClearDatabaseSystem()"
                                 class="btn btn-outline-danger btn-sm"
                             >
-                                <span id="deleteAllRecordsLabel">Request deletion of all records</span>
+                                <span id="deleteAllRecordsLabel">Delete all records</span>
                             </button>
 
                         </section>
@@ -2333,14 +1462,13 @@ ADD / EDIT PROJECT
                     <section class="projects-page">
                         <div class="projects-page-header">
                             <div>
-                                <div class="dashboard-eyebrow" id="administrationPageEyebrow">Administration</div>
-                                <h1 class="projects-page-title" id="administrationPageTitle">Account</h1>
-                                <p class="projects-page-description" id="administrationPageDescription">Review every account, approve pending staff registrations, and manage staff project access.</p>
+                                <div class="dashboard-eyebrow">Administration</div>
+                                <h1 class="projects-page-title">Account Creation</h1>
                             </div>
                         </div>
-                        <div id="accountManagementCard" class="card account-directory-card">
+                        <div id="accountManagementCard" class="card account-directory-card" hidden>
                             <div class="card-body p-0">
-                                <div class="account-directory-toolbar"><div class="account-directory-heading"><span class="account-directory-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><div><h2>Account directory</h2><p id="accountDirectorySummary" aria-live="polite">Manage accounts and access.</p></div></div><div class="account-directory-tools"><label class="account-search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><span class="visually-hidden">Find an account</span><input id="accountDirectorySearch" type="search" placeholder="Find name or username" oninput="filterAccountDirectory()" autocomplete="off"></label><button type="button" class="btn account-directory-passwords" onclick="openAllUserPasswords()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3"/></svg><span>View all passwords</span></button><button type="button" class="btn btn-primary account-directory-create" onclick="openAccountEditor()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Create account</span></button></div></div>
+                                <div class="account-directory-toolbar"><div class="account-directory-heading"><span class="account-directory-symbol" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87"/><circle cx="9" cy="7" r="4"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span><div><h2>Account directory</h2><p id="accountDirectorySummary" aria-live="polite">Manage accounts and access.</p></div></div><div class="account-directory-tools"><label class="account-search"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><span class="visually-hidden">Find an account</span><input id="accountDirectorySearch" type="search" placeholder="Find name or username" oninput="filterAccountDirectory()" autocomplete="off"></label><button type="button" class="btn btn-primary account-directory-create" onclick="openAccountEditor()"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>Create account</span></button></div></div>
                                 <div id="accountRequestsMessage" class="p-4 text-muted">Loading accounts…</div>
                                 <div class="table-responsive">
                                     <table class="table table-hover mb-0" aria-label="Account directory">
@@ -2351,11 +1479,22 @@ ADD / EDIT PROJECT
                             </div>
                         </div>
 
+                    </section>
+                </div>
+
+                <div id="administrationSettingsSection" class="col-12">
+                    <section class="projects-page">
+                        <div class="projects-page-header">
+                            <div>
+                                <h1 class="projects-page-title">Administration</h1>
+                                <p class="projects-page-description">Manage the working-day calendar, timeline reminders, and backups.</p>
+                            </div>
+                        </div>
                         <section id="holidayCalendarCard" hidden class="d-none account-audit-card mt-4" aria-labelledby="holidayCalendarTitle">
                             <details class="account-calendar-details"><summary class="account-calendar-toggle"><span class="account-calendar-summary"><span class="dashboard-eyebrow">Working-day calendar</span><strong id="holidayCalendarTitle">Philippine holidays</strong><small>Set working days and manage holiday dates.</small></span><span class="account-calendar-open">Manage calendar <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg></span></summary><div class="account-calendar-refresh"><button type="button" class="btn btn-sm btn-outline-secondary" onclick="loadHolidayCalendar()">Refresh calendar</button></div>
                             <div class="p-4">
                                 <p id="holidaySyncStatus" class="mb-2">Loading holiday calendar…</p>
-                                <p class="text-muted small">Checks official Presidential Communications Office announcements daily at 03:00 Philippine time, with hourly retries after failures. The saved calendar remains available offline. Choose non-working weekdays and whether holidays are excluded. Use each date’s action to include or exclude an individual holiday.</p>
+                                <p class="text-muted small">Checks holiday announcements daily at 03:00 Philippine time, with hourly retries after failures. If the official feed is unavailable, the tracker checks published proclamations. The saved calendar works offline. Manual date corrections take priority over the weekday and holiday settings.</p>
                                 <div id="holidaySyncControls" hidden class="d-none d-flex flex-wrap gap-3 align-items-center mb-3"><label class="form-check-label"><input id="holidaySyncEnabled" type="checkbox" class="form-check-input me-2">Automatic updates</label><button type="button" class="btn btn-sm btn-primary" onclick="saveHolidayOptions()">Save setting</button><button type="button" class="btn btn-sm btn-outline-primary" onclick="saveHolidayChange('sync')">Sync now</button></div>
                                 <fieldset class="mb-3"><legend class="fs-6">Non-working weekdays</legend><label class="form-check-label me-3"><input class="form-check-input me-1" type="checkbox" data-non-working-day value="0">Sunday</label><label class="form-check-label me-3"><input class="form-check-input me-1" type="checkbox" data-non-working-day value="1">Monday</label><label class="form-check-label me-3"><input class="form-check-input me-1" type="checkbox" data-non-working-day value="2">Tuesday</label><label class="form-check-label me-3"><input class="form-check-input me-1" type="checkbox" data-non-working-day value="3">Wednesday</label><label class="form-check-label me-3"><input class="form-check-input me-1" type="checkbox" data-non-working-day value="4">Thursday</label><label class="form-check-label me-3"><input class="form-check-input me-1" type="checkbox" data-non-working-day value="5">Friday</label><label class="form-check-label me-3"><input class="form-check-input me-1" type="checkbox" data-non-working-day value="6">Saturday</label></fieldset><label class="form-check-label mb-3"><input id="holidayExcludeHolidays" type="checkbox" class="form-check-input me-2">Exclude holidays from working-day calculations</label><p id="holidaySyncMessage" role="status" aria-live="polite"></p>
                                 <p id="holidayCalendarCoverage" class="text-muted small"></p>
@@ -2384,24 +1523,10 @@ ADD / EDIT PROJECT
                                 <div><label class="form-label" for="timelineLeadBidding">Pre-inspection / NTP / Material testing</label><select id="timelineLeadBidding" class="form-select" onchange="toggleTimelineCustomDays('bidding')"><option value="7">7 days</option><option value="10">10 days</option><option value="14">14 days</option><option value="15">15 days</option><option value="30">30 days</option><option value="custom">Custom</option></select><input id="timelineLeadBiddingCustom" class="form-control mt-2 d-none" type="number" min="1" max="3650" step="1" inputmode="numeric" placeholder="Number of days" aria-label="Custom Pre-inspection / NTP / Material testing days"></div>
                                 <div><label class="form-label" for="timelineLeadCompletion">SWA advance reminder</label><select id="timelineLeadCompletion" class="form-select" onchange="toggleTimelineCustomDays('completion')"><option value="7">7 days</option><option value="10">10 days</option><option value="14">14 days</option><option value="15">15 days</option><option value="30">30 days</option><option value="custom">Custom</option></select><input id="timelineLeadCompletionCustom" class="form-control mt-2 d-none" type="number" min="1" max="3650" step="1" inputmode="numeric" placeholder="Number of days" aria-label="Custom SWA advance reminder days"></div>
                                 <div><label class="form-label" for="timelineLeadFinalInspection">Final inspection reminder</label><select id="timelineLeadFinalInspection" class="form-select" onchange="toggleTimelineCustomDays('finalInspection')"><option value="7">7 days before contract due date</option><option value="10">10 days before contract due date</option><option value="14">14 days before contract due date</option><option value="15">15 days before contract due date</option><option value="30">30 days before contract due date</option><option value="custom">Custom days…</option></select><input id="timelineLeadFinalInspectionCustom" class="form-control mt-2 d-none" type="number" min="1" max="3650" step="1" inputmode="numeric" placeholder="Number of days" aria-label="Custom Final inspection reminder days"></div>
+<div><label class="form-label" for="timelineLeadContractEnd">Contract end follow-up</label><select id="timelineLeadContractEnd" class="form-select" onchange="toggleTimelineCustomDays('contractEnd')"><option value="7">7 working days after contract end</option><option value="14">14 working days after contract end</option><option value="30">30 working days after contract end</option><option value="custom">Custom days...</option></select><input id="timelineLeadContractEndCustom" class="form-control mt-2 d-none" type="number" min="1" max="3650" step="1" inputmode="numeric" placeholder="Working days after contract end" aria-label="Custom contract end follow-up days"></div>
                             </div>
                             <p class="form-helper px-4 mb-3">The shared setting controls how early all three bidding-based alerts appear. Their due dates remain one calendar month after bidding, moved to the next working day if it falls on a weekend or Philippine non-working holiday. Saving actual milestone dates automatically resolves the matching alerts.</p>
                             <div class="px-4 pb-4"><button type="button" class="btn btn-primary btn-sm" onclick="saveTimelineLeadTimes()">Save timeline days</button></div>
-                        </section>
-                        <section data-admin-section class="account-audit-card mt-4" aria-labelledby="auditLogTitle">
-                            <div class="account-audit-header">
-                                <div>
-                                    <div class="dashboard-eyebrow">Accountability</div>
-                                    <h2 id="auditLogTitle" class="account-audit-title">Recent activity</h2>
-                                </div>
-                                <div class="d-flex gap-2">
-                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="loadAuditLog()">Refresh</button>
-                                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearAuditHistory()">Clear history</button>
-                                </div>
-                            </div>
-                            <ul id="auditLogList" class="account-audit-list">
-                                <li class="text-muted p-3">Loading activity…</li>
-                            </ul>
                         </section>
                         <section data-admin-section class="account-audit-card backup-settings-card mt-4" aria-labelledby="backupSettingsTitle">
                             <div class="account-audit-header">
@@ -2434,10 +1559,52 @@ ADD / EDIT PROJECT
                         </section>
                     </section>
                 </div>
+
+                <div id="accountabilitySection" class="col-12">
+                    <section class="projects-page">
+                        <div class="projects-page-header">
+                            <div>
+                                <div class="dashboard-eyebrow">Administration</div>
+                                <h1 class="projects-page-title">Accountability</h1>
+                            </div>
+                        </div>
+                        <section class="account-audit-card" aria-labelledby="auditLogTitle">
+                            <div class="account-audit-header">
+                                <div>
+                                    <h2 id="auditLogTitle" class="account-audit-title">Activity log</h2>
+                                    <p class="small text-muted mb-0 mt-1">Dates use Philippine time. Log numbers are permanent.</p>
+                                </div>
+                                <div class="d-flex flex-wrap gap-2">
+                                    <button type="button" class="btn btn-outline-secondary btn-sm" onclick="loadAuditLog()">Refresh</button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm" onclick="clearAuditHistory()">Clear history</button>
+                                </div>
+                            </div>
+                            <form class="audit-date-filters" aria-label="Filter activity by date" onsubmit="applyAuditLogDates(event)">
+                                <div><label for="auditFromDate" class="form-label">From</label><input id="auditFromDate" type="date" class="form-control"></div>
+                                <div><label for="auditToDate" class="form-label">To</label><input id="auditToDate" type="date" class="form-control"></div>
+                                <button type="submit" class="btn btn-primary">Apply</button>
+                                <button type="button" class="btn btn-outline-secondary" onclick="resetAuditLogDates()">Reset</button>
+                                <p id="auditDateError" class="text-danger small mb-0" role="alert" hidden></p>
+                            </form>
+                            <ul id="auditLogList" class="account-audit-list" aria-live="polite">
+                                <li class="text-muted p-3">Loading activity…</li>
+                            </ul>
+                            <div id="auditLogPagination" class="audit-log-pagination" hidden>
+                                <button id="auditLogPrevious" type="button" class="btn btn-outline-secondary btn-sm" onclick="changeAuditLogPage(-1)">Previous</button>
+                                <span id="auditLogPage" class="small text-muted"></span>
+                                <button id="auditLogNext" type="button" class="btn btn-outline-secondary btn-sm" onclick="changeAuditLogPage(1)">Next</button>
+                            </div>
+                        </section>
+                    </section>
+                </div>
             </div>
 
         </div>
 
+        <footer class="app-footer" aria-label="Development credits">
+            <span>Made by Sherwin Angelo E. Pesado &amp; Gabriel C. Gamo</span>
+            <span class="app-footer-affiliation"><span class="app-footer-divider" aria-hidden="true">·</span>MMSU BSIT</span>
+        </footer>
     </main>
 
 
@@ -2478,7 +1645,13 @@ ADD / EDIT PROJECT
 
                     <div id="projectAlertsPanel" class="card notification-panel project-alert-dropdown d-none bg-white" role="dialog" aria-modal="false" aria-label="Project alerts"></div>
                     <div class="project-details-header-actions">
-                        <button type="button" id="projectDetailsAlertsButton" class="project-alert-button btn btn-sm btn-outline-danger" aria-expanded="false" aria-controls="projectAlertsPanel" aria-haspopup="dialog" onclick="toggleProjectAlertsPanel(event)">Alerts</button>
+                        <button type="button" id="projectDetailsHistoryButton" class="btn btn-sm btn-outline-secondary" onclick="openProjectDetailsHistory()">Edit History</button>
+                        <button type="button" id="projectDetailsAlertsButton" class="topbar-icon-button" aria-label="Project alerts" title="Project alerts" aria-expanded="false" aria-controls="projectAlertsPanel" aria-haspopup="dialog" onclick="toggleProjectAlertsPanel(event)">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
+                                <path d="M10 21h4" />
+                            </svg>
+                        </button>
                     <button
                         type="button"
                         class="btn-close"
@@ -2516,6 +1689,7 @@ ADD / EDIT PROJECT
                         >
                             Edit
                         </button>
+                        <button type="button" id="projectDetailsDeletionRequest" class="btn btn-outline-danger d-none" onclick="requestDeletionFromDetails()">Request Deletion</button>
                     </div>
 
                     <button
@@ -2536,78 +1710,50 @@ ADD / EDIT PROJECT
     </div>
 
 
-<!-- =========================================================
-     PROJECT HISTORY / AUDIT TRAIL MODAL
-     ========================================================= -->
-<div
-    class="modal fade"
-    id="historyModal"
-    tabindex="-1"
-    aria-labelledby="historyModalLabel"
-    aria-hidden="true"
->
-    <div
-        class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable"
-    >
-        <div class="modal-content history-modal">
-
-            <!-- Header -->
-            <div class="modal-header history-modal-header">
-
-                <div>
-                    <div class="history-modal-eyebrow">
-                        Project Records
-                    </div>
-
-                    <h5
-                        class="modal-title history-modal-title"
-                        id="historyModalLabel"
-                    >
-                        Audit Trail
-                    </h5>
-
-                    <p class="history-modal-subtitle">
-                        Review saved project changes and timeline actions.
-                    </p>
-                </div>
-
-                <button
-                    type="button"
-                    class="btn-close"
-                    data-bs-dismiss="modal"
-                    aria-label="Close"
-                ></button>
-
+<dialog id="projectArchiveDialog" class="project-action-dialog project-archive-dialog"
+    aria-labelledby="projectArchiveTitle" aria-describedby="projectArchiveDescription"
+    oncancel="if (pendingProjectArchive?.saving) event.preventDefault()">
+    <form class="modal-content project-action-content" onsubmit="confirmProjectArchive(event)">
+        <div class="modal-header">
+            <h2 id="projectArchiveTitle" class="modal-title fs-5">Review archive</h2>
+        </div>
+        <div class="modal-body">
+            <p id="projectArchiveNumber" class="small text-muted mb-1"></p>
+            <p id="projectArchiveName" class="fw-semibold mb-3"></p>
+            <p id="projectArchiveDescription" class="mb-0">This moves the project to Historical Archive. You can’t restore it from Project Tracker.</p>
+            <div id="projectArchiveAcknowledgement" class="form-check mt-3" hidden>
+                <input id="projectArchiveAcknowledged" class="form-check-input" type="checkbox"
+                    onchange="updateProjectArchiveSubmit()">
+                <label class="form-check-label" for="projectArchiveAcknowledged">I understand this project can’t be restored from the app.</label>
             </div>
+            <p id="projectArchiveError" class="text-danger mt-3 mb-0" role="alert" hidden></p>
+        </div>
+        <div class="modal-footer">
+            <button id="projectArchiveCancel" type="button" class="btn btn-outline-secondary" onclick="this.closest('dialog').close()" autofocus>Cancel</button>
+            <button id="projectArchiveContinue" type="button" class="btn btn-primary" onclick="showProjectArchiveStep(true)">Continue</button>
+            <button id="projectArchiveBack" type="button" class="btn btn-outline-secondary" onclick="showProjectArchiveStep(false)" hidden>Back</button>
+            <button id="projectArchiveSubmit" type="submit" class="btn btn-danger" hidden disabled>Archive project</button>
+        </div>
+    </form>
+</dialog>
 
-
-            <!-- Body -->
-            <div
-                class="modal-body history-modal-body"
-                id="historyBody"
-            >
-                <div class="history-empty-state">
-                    Loading project history...
-                </div>
+<dialog id="historyModal" class="project-action-dialog" aria-labelledby="historyModalLabel"
+    onkeydown="if (event.key === 'Escape') event.stopPropagation()">
+    <div class="modal-content history-modal project-action-content">
+        <div class="modal-header history-modal-header">
+            <div>
+                <div class="history-modal-eyebrow">Project Records</div>
+                <h2 class="modal-title history-modal-title" id="historyModalLabel">Edit History</h2>
+                <p class="history-modal-subtitle">See who made each change and the values before and after.</p>
             </div>
-
-
-            <!-- Footer -->
-            <div class="modal-footer history-modal-footer">
-
-                <button
-                    type="button"
-                    class="btn btn-outline-secondary"
-                    data-bs-dismiss="modal"
-                >
-                    Close
-                </button>
-
-            </div>
-
+            <button type="button" class="btn-close" onclick="this.closest('dialog').close()" aria-label="Close Edit History" autofocus></button>
+        </div>
+        <div class="modal-body history-modal-body" id="historyBody"></div>
+        <div class="modal-footer history-modal-footer">
+            <button type="button" class="btn btn-outline-secondary" onclick="this.closest('dialog').close()">Close</button>
         </div>
     </div>
-</div>
+</dialog>
 
 
     <!-- =========================================================
@@ -2713,7 +1859,6 @@ ADD / EDIT PROJECT
                 <div class="modal-body">
 @include('tracker-staff-guide')
 @include('tracker-admin-guide')
-@include('tracker-superadmin-guide')
                 </div>
                 <div class="modal-footer"><p class="guide-footnote">Close this guide to use the main-page buttons.</p><button type="button" class="btn guide-close" data-bs-dismiss="modal">Close guide</button></div>
             </div>
@@ -2728,12 +1873,8 @@ ADD / EDIT PROJECT
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p>Download the template, fill one project per row, then choose a CSV or Excel file. Keep the column headings. Dates should use YYYY-MM-DD, and amounts should be non-negative numbers with up to two decimal places.</p>
-                    <ol class="mb-0">
-                        <li>Choose a file to preview its rows before saving.</li>
-                        <li>Edit any values and review invalid rows in the preview.</li>
-                        <li>Continue to resolve duplicates, then import valid rows.</li>
-                    </ol>
+                    <p>Use the template or a supported consolidated sheet. Keep the column headings and enter one project per row.</p>
+                    <p class="mb-0">Choose a CSV or Excel file to preview before saving. Dates on non-working days move to the next working day. Contract end dates use the start date and duration when available.</p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" onclick="downloadImportTemplate()">Download template</button>
@@ -2747,19 +1888,26 @@ ADD / EDIT PROJECT
         <div class="modal-dialog modal-dialog-centered import-preview-dialog">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="importPreviewTitle">Preview import</h5>
+                    <h5 class="modal-title" id="importPreviewTitle">Review import</h5>
                     <button type="button" class="btn-close" onclick="cancelImportPreview()" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
-                    <p id="importPreviewSummary" class="import-preview-summary" aria-live="polite"></p>
-                    <div class="import-preview-scroll" role="region" aria-label="Editable import rows" tabindex="0">
-                        <table class="table table-bordered align-middle import-preview-table" id="importPreviewTable"></table>
+                    <div class="import-preview-toolbar">
+                        <p id="importPreviewSummary" class="import-preview-summary" aria-live="polite"></p>
+                        <div class="import-preview-filters" role="group" aria-label="Filter spreadsheet rows">
+                            <button type="button" class="btn btn-sm" data-import-filter="all" aria-pressed="true">All rows</button>
+                            <button type="button" class="btn btn-sm" data-import-filter="review" aria-pressed="false">Needs review</button>
+                        </div>
                     </div>
-                    <p class="small text-muted mt-2 mb-0">Scroll sideways for more columns. Edit any cell, then choose Add as a new project or Overwrite existing project for each duplicate. Invalid rows are skipped.</p>
+                    <p id="importPreviewNote" class="import-preview-note" role="status" hidden></p>
+                    <div class="import-preview-scroll" role="region" aria-label="Spreadsheet rows" tabindex="0">
+                        <ul class="import-preview-list" id="importPreviewList"></ul>
+                        <p id="importPreviewEmpty" class="import-preview-empty" hidden>No rows need review.</p>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" onclick="cancelImportPreview()">Cancel</button>
-                    <button type="button" class="btn btn-primary" id="continueImportPreviewButton" onclick="continueImportPreview()">Import reviewed rows</button>
+                    <button type="button" class="btn btn-primary" id="continueImportPreviewButton" onclick="continueImportPreview()">Import projects</button>
                 </div>
             </div>
         </div>
@@ -2906,34 +2054,36 @@ ADD / EDIT PROJECT
         <button type="button" class="btn btn-primary btn-sm" onclick="keepTrackerSessionActive()">Stay signed in</button>
     </div>
     @include('deletion-requests')
-    <script src="js/deletion-requests.js?v=20261030-history-passwords"></script>
-    <script src="js/auth.js?v=20261030-core-defects"></script>
-    <script src="js/session.js?v=20261030-core-defects"></script>
+    <script src="js/deletion-requests.js?v=20261118-deletion-password"></script>
+    <script src="js/auth.js?v=20261118-admin-delete-all"></script>
+    <script src="js/session.js?v=20261111-admin-roles"></script>
 
-    <script src="js/admin.js?v=20261030-core-defects"></script>
+    <script src="js/admin.js?v=20261118-log-numbers"></script>
 
-    <script src="js/db.js?v=20261029-deletion-approval"></script>
+    <script src="js/db.js?v=20261111-admin-roles"></script>
 
     <script src="js/state.js?v=20261006-notification-navigation"></script>
 
     <script>window.projectHolidayCalendar = @json(\App\Support\TrackerHolidays::calendar());</script>
-    <script src="js/utils.js?v=20261007-block-dates"></script>
+    <script src="js/utils.js?v=20261118-project-revision"></script>
 
-    <script src="js/history.js?v=20261010-history-actor"></script>
+    <script src="js/history.js?v=20261117-archive-confirmation"></script>
 
-    <script src="js/timeline.js?v=20261010-date-only-alerts"></script>
+    <script src="js/timeline.js?v=20261118-project-revision"></script>
 
-    <script src="js/projects.js?v=20261030-core-defects"></script>
-    <script src="js/project-presence.js?v=20261011-account-sessions"></script>
-    <script src="js/guide.js?v=20261030-role-guides"></script>
+    <script src="js/project-fields.js?v=20261118-project-revision"></script>
+    <script src="js/project-revision.js?v=20261118-project-revision"></script>
+    <script src="js/projects.js?v=20261118-project-revision"></script>
+    <script src="js/project-presence.js?v=20261111-admin-roles"></script>
+    <script src="js/guide.js?v=20261111-admin-roles"></script>
 
-    <script src="js/workspace.js?v=20261010-date-only-alerts"></script>
+    <script src="js/workspace.js?v=20261117-accountability"></script>
 
-    <script src="js/excel.js?v=20261030-core-defects"></script>
+    <script src="js/excel.js?v=20261118-project-revision"></script>
 
-    <script src="js/holidays.js?v=20261007-block-dates"></script>
-    <script src="js/workday-picker.js?v=20261007-block-dates"></script>
-    <script src="js/app.js?v=20261006-integrity-audit"></script>
+    <script src="js/holidays.js?v=20261111-audit-fixes"></script>
+    <script src="js/workday-picker.js?v=20261118-project-revision"></script>
+    <script src="js/app.js?v=20261111-admin-roles"></script>
     
 
 

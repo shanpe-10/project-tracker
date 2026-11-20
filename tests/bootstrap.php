@@ -23,7 +23,7 @@ foreach (['APP_BASE_PATH'=>$root,'APP_URL'=>'http://localhost','APP_ENV'=>'testi
     'VIEW_COMPILED_PATH'=>$temporary.'/views','SESSION_PATH'=>'/','SESSION_DOMAIN'=>'','SESSION_COOKIE'=>'tracker_test_session','SESSION_SECURE_COOKIE'=>'false','SESSION_DRIVER'=>'array','CACHE_STORE'=>'array','BCRYPT_ROUNDS'=>'4',
     'QUEUE_CONNECTION'=>'sync','MAIL_MAILER'=>'array','TRACKER_TEST_STORAGE_PATH'=>$temporary,
     'TRACKER_ATTACHMENTS_PATH'=>$temporary.'/attachments','TRACKER_PROFILE_PHOTOS_PATH'=>$temporary.'/photos',
-    'TRACKER_CLOUD'=>'false','TRACKER_MEDIA_DISK'=>'','TRACKER_HOLIDAY_STATE_PATH'=>$temporary.'/holiday-sync.json'] as $key=>$value) {
+    'TRACKER_HOLIDAY_STATE_PATH'=>$temporary.'/holiday-sync.json'] as $key=>$value) {
     putenv($key.'='.$value); $_ENV[$key]=$_SERVER[$key]=$value;
 }
 register_shutdown_function(function () use ($temporary) {

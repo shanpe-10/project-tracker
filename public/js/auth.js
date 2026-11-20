@@ -24,6 +24,7 @@ async function authRequest(action, payload = {}) {
     return result;
 }
 function applyAuthenticatedUser(user, csrfToken, sessionTiming = null, refreshOnly = false) {
+    const lostAdminAccess = window.currentUser?.role === "admin" && user.role !== "admin";
     window.currentUser = user;
     window.sessionCsrfToken = csrfToken;
     document.getElementById("currentUserName").textContent = user.fullName || user.username;
@@ -46,40 +47,37 @@ function applyAuthenticatedUser(user, csrfToken, sessionTiming = null, refreshOn
         menuAvatar.classList.toggle("has-photo", Boolean(user.profilePhoto));
     }
     const menuRole = document.getElementById("accountMenuRole");
-    if (menuRole) menuRole.textContent = ({superadmin: "Superadmin", admin: "Administrator", staff: "Staff"})[user.role] || "Account";
-    document.getElementById("accountRequestsTabBtn")?.classList.toggle("d-none", !["admin", "superadmin"].includes(user.role));
+    if (menuRole) menuRole.textContent = ({admin: "Administrator", staff: "Staff"})[user.role] || "Account";
+    const isAdmin = user.role === "admin";
+    const administrationNavigation = document.getElementById("administrationNavigation");
+    const staffDeletionNavigation = document.getElementById("staffDeletionNavigation");
+    const deletionRequestsNav = document.getElementById("deletionRequestsNav");
+    const deletionLinks = isAdmin ? document.getElementById("administrationLinks") : staffDeletionNavigation;
+    if (deletionRequestsNav.parentElement !== deletionLinks) deletionLinks.append(deletionRequestsNav);
+    administrationNavigation.classList.toggle("d-none", !isAdmin);
+    staffDeletionNavigation.classList.toggle("d-none", user.role !== "staff");
+    if (lostAdminAccess && isAdminWorkspace(activeWorkspace)) switchWorkspace("dashboard");
     if (!refreshOnly && typeof resetDeletionRequests === "function") resetDeletionRequests();
-    document.getElementById("deletionRequestsNav")?.classList.toggle("d-none", user.role === "superadmin");
-    if (!refreshOnly && typeof startDeletionRequestUpdates === "function" && user.role !== "superadmin") startDeletionRequestUpdates();
-    const isSuperadmin = user.role === "superadmin";
+    if (!refreshOnly && typeof startDeletionRequestUpdates === "function") startDeletionRequestUpdates();
     if (typeof window.refreshRoleGuide === 'function') window.refreshRoleGuide();
-    document.body.classList.toggle("account-management-only", isSuperadmin);
-    document.querySelectorAll("[data-project-navigation]").forEach(button => button.hidden = isSuperadmin);
-    const eyebrow = document.getElementById("administrationPageEyebrow");
-    if (eyebrow) eyebrow.textContent = isSuperadmin ? "Account management" : "Administration";
-    if (isSuperadmin) { window.projectNotificationGroups = []; window.notificationAlertTotal = 0; }
-    setPermissionControlState("addProjectButton", user.canCreate, "Ask Superadmin for Add projects permission.");
-    setPermissionControlState("exportExcelButton", user.canExport, "Ask Superadmin for Export Excel permission.");
-    setPermissionControlState("importExcelButton", user.canImport, "Ask Superadmin for Import Excel permission.");
-    setPermissionControlState("deleteAllRecordsButton", user.canDeleteAll, "Ask Superadmin for Delete all records permission.");
+    setPermissionControlState("addProjectButton", user.canCreate, "Ask Admin for Add projects permission.");
+    setPermissionControlState("exportExcelButton", user.canExport, "Ask Admin for Export Excel permission.");
+    setPermissionControlState("importExcelButton", user.canImport, "Ask Admin for Import Excel permission.");
+    setPermissionControlState("deleteAllRecordsButton", isAdmin, "Only Admin can delete all records.");
+    const deleteAllZone = document.getElementById("deleteAllRecordsZone");
+    if (deleteAllZone) { deleteAllZone.hidden = !isAdmin; deleteAllZone.classList.toggle("d-none", !isAdmin); }
     const deleteAllLabel = document.getElementById("deleteAllRecordsLabel");
-    if (deleteAllLabel) deleteAllLabel.textContent = user.role === "admin" ? "Delete all records" : "Request deletion of all records";
+    if (deleteAllLabel) deleteAllLabel.textContent = "Delete all records";
     if (!refreshOnly) clearInterval(window.accountNotificationTimer);
     if (!refreshOnly) window.pendingAccountRequests = [];
     const management = document.getElementById("accountManagementCard");
     const holidayCard=document.getElementById('holidayCalendarCard');
-    if (holidayCard) { holidayCard.hidden=!isSuperadmin; holidayCard.classList.toggle('d-none',!isSuperadmin); }
-    if (management) management.hidden = user.role !== "superadmin";
+    if (holidayCard) { holidayCard.hidden=!isAdmin; holidayCard.classList.toggle('d-none',!isAdmin); }
+    if (management) management.hidden = !isAdmin;
     document.querySelectorAll("[data-admin-section]").forEach(section => section.hidden = user.role !== "admin");
-    const title = document.getElementById("administrationPageTitle");
-    const description = document.getElementById("administrationPageDescription");
-    if (title) title.textContent = user.role === "superadmin" ? "Accounts" : "Administration";
-    if (description) description.textContent = user.role === "superadmin" ? "Create, edit and delete accounts; manage Staff permissions and holidays." : "Manage timeline reminders, recent activity and automatic backups.";
-    const tab = document.querySelector("#accountRequestsTabBtn span:last-child");
-    if (tab) tab.textContent = user.role === "superadmin" ? "Accounts" : "Admin";
     document.body.classList.remove("authentication-required");
     document.getElementById("loginOverlay")?.classList.add("d-none");
-    if (!refreshOnly && user.role === "superadmin" && typeof refreshPendingAccountNotifications === "function") {
+    if (!refreshOnly && isAdmin && typeof refreshPendingAccountNotifications === "function") {
         refreshPendingAccountNotifications();
         clearInterval(window.accountNotificationTimer);
         window.accountNotificationTimer = setInterval(refreshPendingAccountNotifications, 30000);
@@ -89,22 +87,26 @@ function applyAuthenticatedUser(user, csrfToken, sessionTiming = null, refreshOn
         if (typeof renderTablePage === 'function') renderTablePage();
         if (typeof renderProjectAttachments === 'function') renderProjectAttachments();
         document.getElementById('projectDetailsEditButton')?.classList.toggle('d-none', !user.canEdit);
+        if (typeof syncProjectDetailsDeletionRequest === "function") syncProjectDetailsDeletionRequest();
         const save = document.getElementById('saveBtn');
         if (save && typeof editingId !== 'undefined') {
             const allowed = editingId === null ? user.canCreate : user.canEdit;
             save.disabled = !allowed || (typeof projectSaveInProgress !== 'undefined' && projectSaveInProgress);
-            save.title = allowed ? '' : 'Permission changed. Your draft is kept; contact Superadmin for access.';
+            save.title = allowed ? '' : 'Permission changed. Your draft is kept; contact Admin for access.';
         }
     }
 }
 function showLogin(message = "") {
     if (typeof preserveSuspendedProjectDraft === "function" && preserveSuspendedProjectDraft()) message += " Your project draft is kept in this tab. Sign in with the same account to continue; do not refresh or close this tab.";
     if (typeof stopTrackerSession === "function") stopTrackerSession();
+    document.querySelectorAll(".project-action-dialog[open]").forEach(dialog => dialog.close());
     if (typeof bootstrap !== "undefined") document.querySelectorAll(".modal.show").forEach(modal => bootstrap.Modal.getInstance(modal)?.hide());
     if (typeof resetFormAccess === "function") resetFormAccess({ silent: true, navigate: false, preserveDraft: true });
     if (typeof stopProjectEditingPresence === "function") void stopProjectEditingPresence({ clear: true });
     if (typeof resetDeletionRequests === "function") resetDeletionRequests();
     window.currentUser = null;
+    document.getElementById("administrationNavigation")?.classList.add("d-none");
+    document.getElementById("staffDeletionNavigation")?.classList.add("d-none");
     if (typeof window.refreshRoleGuide === 'function') window.refreshRoleGuide();
     db = null; window.db = null; window.dbReady = false;
     window.pendingAccountRequests = [];
@@ -125,15 +127,30 @@ function connectionHelpMessage() {
 }
 async function signIn(event) {
     event.preventDefault();
-    const username = document.getElementById("loginUsername").value.trim(), password = document.getElementById("loginPassword").value;
+    const usernameField = document.getElementById("loginUsername");
+    const passwordField = document.getElementById("loginPassword");
+    const username = usernameField.value.trim(), password = passwordField.value;
     const submitButton = event.currentTarget.querySelector("button[type='submit']");
+    const setup = document.getElementById("initialAdminSetup");
+    const setupFields = Array.from(setup.querySelectorAll("input"));
+    const isSettingUp = !setup.classList.contains("d-none");
+    const payload = { username, password };
+    if (isSettingUp) {
+        [payload.setup_code, payload.new_password, payload.new_password_confirmation] = setupFields.map(input => input.value);
+    }
     submitButton.disabled = true;
     try {
-        const result = await authRequest("login", { username, password });
+        const result = await authRequest("login", payload);
         if (!result.ok) {
             const message = result.message || "Sign-in failed.";
             showLogin(message);
-            if (message.includes("awaiting Superadmin approval")) {
+            if (result.requiresPasswordSetup && !isSettingUp) {
+                setup.classList.remove("d-none");
+                setupFields.forEach(input => { input.required = true; });
+                submitButton.textContent = "Set password and sign in";
+                setupFields[0].focus();
+            }
+            if (message.includes("Your account is inactive")) {
                 // Keep the approval message in the sign-in card.  A Bootstrap modal
                 // would sit behind the login overlay and trap focus, which prevents
                 // people from editing their username or password to try another account.
@@ -142,7 +159,11 @@ async function signIn(event) {
             return;
         }
         applyAuthenticatedUser(result.user, result.csrfToken, result.sessionTiming);
-        document.getElementById("loginPassword").value = "";
+        passwordField.value = "";
+        setupFields.forEach(input => { input.value = ""; input.required = false; });
+        setup.classList.add("d-none");
+        submitButton.textContent = "Sign in";
+        sessionStorage.removeItem("lguProjectTrackerWorkspace");
         await initializeDatabase();
     } catch (_) {
         showLogin(connectionHelpMessage());

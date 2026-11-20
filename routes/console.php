@@ -41,7 +41,7 @@ Artisan::command('tracker:create-admin', function () {
         }
         DB::table('users')->insert([
             'username' => $username, 'full_name' => $name,
-            'password_hash' => Hash::make($password), 'password_encrypted' => \Illuminate\Support\Facades\Crypt::encryptString($password), 'role' => 'admin',
+            'password_hash' => Hash::make($password), 'role' => 'admin',
             'active' => true, 'created_at' => now(),
         ]);
     });
@@ -49,37 +49,15 @@ Artisan::command('tracker:create-admin', function () {
     return 0;
 })->purpose('Create the first tracker administrator on a new installation');
 
-Artisan::command('tracker:create-superadmin', function () {
-    if (! Schema::hasTable('users')) {
-        $this->error('Set up the tracker database before creating an Superadmin.');
+Artisan::command('tracker:prepare-first-admin {--renew : Replace the setup code while the first Admin is pending}', function () {
+    try {
+        $this->line(\App\Support\TrackerInitialAdmin::prepare((bool) $this->option('renew')));
+    } catch (\RuntimeException $error) {
+        $this->error($error->getMessage());
+
         return 1;
     }
-    if (DB::table('users')->where('role', 'superadmin')->exists()) {
-        $this->error('An Superadmin already exists. Sign in with that account.');
-        return 1;
-    }
-    $name = trim((string) $this->ask('Superadmin full name'));
-    $username = trim((string) $this->ask('Superadmin username'));
-    $password = (string) $this->secret('Password (at least 12 characters)');
-    $confirmation = (string) $this->secret('Confirm password');
-    if ($name === '' || mb_strlen($name) > 160 || ! preg_match('/^[A-Za-z0-9._-]{3,80}$/', $username) || mb_strlen($password) < 12 || strlen($password) > 72 || str_contains($password, "\0") || $password !== $confirmation) {
-        $this->error('Check the name, username, and matching password of at least 12 characters and at most 72 bytes.');
-        return 1;
-    }
-    DB::transaction(function () use ($name, $username, $password) {
-        if (DB::connection()->getDriverName() === 'pgsql') DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ['tracker:create-superadmin']);
-        if (DB::table('users')->where('role', 'superadmin')->lockForUpdate()->exists()) {
-            throw new \RuntimeException('An Superadmin was created while this command was running.');
-        }
-        DB::table('users')->insert([
-            'username' => $username, 'full_name' => $name,
-            'password_hash' => Hash::make($password), 'password_encrypted' => \Illuminate\Support\Facades\Crypt::encryptString($password), 'role' => 'superadmin',
-            'active' => true, 'created_at' => now(),
-        ]);
-    });
-    $this->info('Superadmin created. You can now sign in to the tracker.');
-    return 0;
-})->purpose('Create the first tracker Superadmin on a new installation');
+})->purpose('Prepare the first Admin on an empty host and issue its one-time setup code');
 
 $backupSchedule = Schedule::command('tracker:backup')->timezone('Asia/Taipei')->withoutOverlapping(20);
 if (config('tracker.cloud')) $backupSchedule->hourlyAt(5);

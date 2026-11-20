@@ -10,7 +10,7 @@
     function timing(value) {
         if (!value || !Number.isFinite(value.serverNow)) return;
         absoluteDeadline = value.expiresAt === null ? null : now() + Math.max(0, value.expiresAt - value.serverNow) * 1000;
-        idleDeadline = window.currentUser?.role === "superadmin" || value.idleExpiresAt === null
+        idleDeadline = value.idleExpiresAt === null
             ? null : now() + Math.max(0, value.idleExpiresAt - value.serverNow) * 1000;
         renderWarning();
     }
@@ -97,7 +97,7 @@
 
     function userActivity(event) {
         if (event && !event.isTrusted) return;
-        if (!window.currentUser || window.currentUser.role === "superadmin") return;
+        if (!window.currentUser) return;
         if ((idleDeadline !== null && now() >= idleDeadline) || (absoluteDeadline !== null && now() >= absoluteDeadline)) {
             void checkSession();
             return;

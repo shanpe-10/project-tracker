@@ -14,7 +14,7 @@
 
     function userKey() {
         const user = window.currentUser;
-        return user && user.role !== "superadmin" ? `${user.id}:${window.sessionCsrfToken}` : "";
+        return user ? `${user.id}:${window.sessionCsrfToken}` : "";
     }
 
     async function request(method, payload, csrf = window.sessionCsrfToken, keepalive = false) {

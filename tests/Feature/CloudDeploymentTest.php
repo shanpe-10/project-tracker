@@ -45,7 +45,7 @@ class CloudDeploymentTest extends TestCase
     {
         foreach ([1=>'admin',2=>'staff',3=>'staff'] as $id=>$role) {
             DB::table('users')->insert(['id'=>$id,'username'=>'cloud'.$id,'full_name'=>'Cloud '.$id,
-                'role'=>$role,'active'=>true,'can_edit'=>$id!==3,'password_hash'=>'fixture']);
+                'role'=>$role,'active'=>true,'can_edit'=>$id!==3,'password_hash'=>Hash::make('fixture-password')]);
         }
     }
 
@@ -125,9 +125,9 @@ class CloudDeploymentTest extends TestCase
         putenv('TRACKER_BOOTSTRAP_PASSWORD=test-only-pilot-password');
         $this->assertSame(0,Artisan::call('tracker:bootstrap-cloud'));
         $user = DB::table('users')->first();
-        $this->assertSame('superadmin',$user->role);
+        $this->assertSame('admin',$user->role);
         $this->assertTrue(Hash::check('test-only-pilot-password',$user->password_hash));
-        $this->assertSame('test-only-pilot-password', \Illuminate\Support\Facades\Crypt::decryptString($user->password_encrypted));
+        $this->assertNull($user->password_encrypted);
         putenv('TRACKER_BOOTSTRAP_PASSWORD=replacement-test-password');
         $this->assertSame(0,Artisan::call('tracker:bootstrap-cloud'));
         $this->assertDatabaseCount('users',1);
@@ -159,6 +159,7 @@ class CloudDeploymentTest extends TestCase
         $this->assertFalse(TrackerHolidays::state()['enabled']);
         $this->assertSame(1,TrackerHolidays::state()['revision']);
         $this->assertSame('Pilot holiday',TrackerHolidays::state()['overrides']['2026-10-12']['name']);
+        $this->assertTrue(TrackerHolidays::calendar()['dateOverrides']['2026-10-12']);
         $this->expectException(\DomainException::class);
         TrackerHolidays::update(0,fn ($state)=>$state);
     }

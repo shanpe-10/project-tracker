@@ -49,8 +49,8 @@ class RequireTrackerUser
             }
         }
 
-        if ($account->role === 'superadmin' && ! $request->is('api/profile.php', 'api/holidays.php')) {
-            return response()->json(['ok' => false, 'message' => 'Superadmin access is limited to account management and holiday settings.'], 403);
+        if (! in_array($account->role, ['admin', 'staff'], true)) {
+            return response()->json(['ok' => false, 'message' => 'Project Tracker access requires an Admin or Staff account.'], 403);
         }
 
         return $next($request);

@@ -332,7 +332,10 @@ function isProjectWorkday(date, utc = true) {
     const month = (utc ? date.getUTCMonth() : date.getMonth()) + 1;
     const dayOfMonth = utc ? date.getUTCDate() : date.getDate();
     const key = `${year}-${String(month).padStart(2, "0")}-${String(dayOfMonth).padStart(2, "0")}`;
-    return !(window.projectHolidayCalendar?.nonWorkingDays || [0,6]).includes(day) && (window.projectHolidayCalendar?.excludeHolidays === false || !window.projectHolidayCalendar?.years?.[year]?.[key]);
+    const calendar = window.projectHolidayCalendar;
+    const override = calendar?.dateOverrides?.[key];
+    if (typeof override === "boolean") return !override;
+    return !(calendar?.nonWorkingDays || [0,6]).includes(day) && (calendar?.excludeHolidays === false || !calendar?.years?.[year]?.[key]);
 }
 
 
@@ -391,11 +394,12 @@ function getProjectMilestoneDates(project = {}) {
     const end = start && days !== null
         ? addProjectWorkdays(start, days)
         : projectWeekday(projectCalendarDate(project.contractEndDate));
-    return { noaDueDate: projectCalendarDate(project.noaDueDate) ? projectWeekday(projectCalendarDate(project.noaDueDate)).toISOString().slice(0, 10) : "", preInspectionDueDate: biddingDue, ntpDueDate: biddingDue, materialTestingDueDate: biddingDue, contractDueDate: end ? end.toISOString().slice(0, 10) : "", finalInspectionDueDate: end ? end.toISOString().slice(0, 10) : "" };
+    return { contractEndReminderDate: end ? addProjectWorkdays(end, typeof getTimelineDays === "function" ? getTimelineDays("contractEnd") : 7).toISOString().slice(0,10) : "", noaDueDate: projectCalendarDate(project.noaDueDate) ? projectWeekday(projectCalendarDate(project.noaDueDate)).toISOString().slice(0, 10) : "", preInspectionDueDate: biddingDue, ntpDueDate: biddingDue, materialTestingDueDate: biddingDue, contractDueDate: end ? end.toISOString().slice(0, 10) : "", finalInspectionDueDate: end ? end.toISOString().slice(0, 10) : "" };
 }
 
 function projectMilestoneDueDate(project, type) {
     const dates = getProjectMilestoneDates(project);
+    if (type.startsWith("contract-end")) return dates.contractEndReminderDate;
     if (type.startsWith("noa")) return dates.noaDueDate;
     if (type.startsWith("pre-inspection")) return dates.preInspectionDueDate;
     if (type.startsWith("final-inspection")) return dates.finalInspectionDueDate;

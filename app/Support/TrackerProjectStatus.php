@@ -17,13 +17,14 @@ final class TrackerProjectStatus
         DB::table('projects')->select('id','data','project_status')->orderBy('id')->chunkById(500, function ($rows) use (&$changed) {
             foreach ($rows as $row) {
                 $data = json_decode($row->data,true) ?: [];
+                if (($data['statusMode'] ?? '') === 'manual') continue;
                 $today = now('Asia/Manila')->format('Y-m-d');
                 $end = TrackerMilestones::dueDates($data)['contractDueDate'];
                 $futureActual = false;
                 foreach (['completion','swa'] as $field) if (TrackerMilestones::date($data[$field] ?? null) && $data[$field] > $today) $futureActual = true;
                 // Keep legacy manual states without a deadline; refresh clock/calendar transitions.
-                if (!$futureActual && !$end) continue;
-                $status = TrackerProjectInput::automaticStatus($data);
+                if (($data['statusMode'] ?? '') !== 'automatic' && !$futureActual && !$end) continue;
+                $status = TrackerProjectInput::effectiveStatus($data);
                 if (($data['status'] ?? null) === $status && $row->project_status === $status) continue;
                 $data['status'] = $status;
                 // An intervening save wins; never overwrite any changed project fields.

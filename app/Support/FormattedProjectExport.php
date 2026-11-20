@@ -12,24 +12,6 @@ final class FormattedProjectExport
 {
     private const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 
-    private const COLUMNS = [
-        'projectNo', 'title', 'biddingDate', 'approvedBudget', 'bidAmount',
-        'winningBidder', 'sourceOfFund', 'prNumber', 'prDate', 'obre',
-        'resolutionNumber', 'resolutionDate', 'noticePostQual', 'noa',
-        'performanceBond', 'contractRef', 'contractDuration', 'ntpDate',
-        'dole', 'contractEndDate', 'preInspection', 'finalInspection',
-        'swa', 'ldAmount', 'ldNoOfDays', 'ldNewCompletionDate',
-        'ldActualDuration', 'completion', 'status', 'remarks', 'materialTestingDate', 'noaDueDate',
-    ];
-
-    private const DATES = [
-        'biddingDate', 'prDate', 'obre', 'resolutionDate', 'noticePostQual',
-        'noa', 'performanceBond', 'contractRef', 'ntpDate', 'dole',
-        'contractEndDate', 'preInspection', 'finalInspection', 'swa',
-        'ldNewCompletionDate', 'completion', 'materialTestingDate', 'noaDueDate',
-    ];
-
-    private const AMOUNTS = ['approvedBudget', 'bidAmount', 'ldAmount'];
 
     public static function create(iterable $records, string $templatePath): string
     {
@@ -78,26 +60,9 @@ final class FormattedProjectExport
                 }
             }
 
-            // Append the new field without shifting existing spreadsheet columns.
-            $header = $xpath->query('./x:c', $templateRows[1])->item(29)->cloneNode(true);
-            $header->setAttribute('r', 'AE1');
-            self::setCell($document, $header, 'remarks', 'Material Testing Date');
-            $templateRows[1]->appendChild($header);
-            $column = $document->createElementNS(self::NS, 'col');
-            foreach (['min'=>'31', 'max'=>'31', 'width'=>'18', 'customWidth'=>'1'] as $key=>$value) $column->setAttribute($key, $value);
-            $xpath->query('/x:worksheet/x:cols')->item(0)?->appendChild($column);
-            $columnWidths[31] = 18;
-            $noaHeader = $header->cloneNode(true);
-            $noaHeader->setAttribute('r', 'AF1');
-            self::setCell($document, $noaHeader, 'remarks', 'NOA Due Date');
-            $templateRows[1]->appendChild($noaHeader);
-            $noaColumn = $column->cloneNode(true);
-            $noaColumn->setAttribute('min', '32');
-            $noaColumn->setAttribute('max', '32');
-            $xpath->query('/x:worksheet/x:cols')->item(0)?->appendChild($noaColumn);
-            $columnWidths[32] = 18;
             $count = 0;
             foreach ($records as $record) {
+                $record = TrackerProjectRevision::exportRecord($record);
                 $count++;
                 $rowNumber = $count + 1;
                 $row = $templateRows[$rowNumber] ?? null;
@@ -112,7 +77,7 @@ final class FormattedProjectExport
                     $cells[] = $cell;
                 }
                 $wrappedLines = 1;
-                foreach (self::COLUMNS as $index => $key) {
+                foreach (array_keys(TrackerProjectFields::columns()) as $index => $key) {
                     if (in_array($key, ['materialTestingDate','noaDueDate'], true) && !isset($cells[$index])) {
                         $cells[$index] = $cells[20]->cloneNode(true);
                         $row->appendChild($cells[$index]);
@@ -122,7 +87,7 @@ final class FormattedProjectExport
                     }
                     $cell = $cells[$index];
                     $cell->setAttribute('r', self::columnLetter($index + 1).$rowNumber);
-                    self::setCell($document, $cell, $key, $record[$key] ?? '');
+                    self::setCell($document, $cell, $key, TrackerProjectFields::isNotApplicable($record) && str_starts_with($key,'ld') ? TrackerProjectFields::display($record,$key) : ($record[$key] ?? ''));
                     $text = is_scalar($record[$key] ?? null) ? trim((string) $record[$key]) : '';
                     $usableWidth = max(8, (int) floor(($columnWidths[$index + 1] ?? 20) - 2));
                     $lines = 0;
@@ -143,7 +108,7 @@ final class FormattedProjectExport
             }
 
             $lastRow = max(1, $count + 1);
-            $range = 'A1:'.self::columnLetter(count(self::COLUMNS)).$lastRow;
+            $range = 'A1:'.self::columnLetter(count(TrackerProjectFields::columns())).$lastRow;
             $dimension = $xpath->query('/x:worksheet/x:dimension')->item(0);
             $dimension?->setAttribute('ref', $range);
             $filter = $xpath->query('/x:worksheet/x:autoFilter')->item(0);
@@ -175,20 +140,23 @@ final class FormattedProjectExport
             return;
         }
 
-        if (in_array($key, self::DATES, true)) {
+        if (in_array($key, TrackerProjectFields::dates(), true)) {
             $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $value, new \DateTimeZone('UTC'));
             if ($date && $date->format('Y-m-d') === $value) {
                 $base = new \DateTimeImmutable('1899-12-30', new \DateTimeZone('UTC'));
                 self::setNumber($document, $cell, (string) $base->diff($date)->format('%r%a'));
                 return;
             }
-        } elseif (in_array($key, self::AMOUNTS, true)) {
+        } elseif (in_array($key, ['approvedBudget','bidAmount','materialTestingAmount','ldAmount','losingBidAmount1','losingBidAmount2'], true)) {
             $amount = preg_replace('/[₱,$\s]/u', '', $value);
             if (preg_match('/^\d+(?:\.\d{1,2})?$/', $amount)) {
                 self::setNumber($document, $cell, $amount);
                 return;
             }
-        } elseif ($key === 'ldNoOfDays' && preg_match('/^\d+$/', $value)) {
+        } elseif ($key === 'physicalAccomplishment' && is_numeric($value) && (float)$value >= 0 && (float)$value <= 100) {
+            self::setNumber($document, $cell, (string)((float)$value / 100));
+            return;
+        } elseif (in_array($key,['contractDuration','ldActualDuration'],true) && is_numeric($value)) {
             self::setNumber($document, $cell, $value);
             return;
         }

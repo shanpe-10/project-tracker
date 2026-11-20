@@ -191,6 +191,7 @@ class TrackerDeletionController extends Controller
     public function requestFor(Request $request, string $type, bool $all = false): JsonResponse
     {
         $user = $this->user($request);
+        if ($all && $user['role'] !== 'admin') $this->fail(403, 'Only Admin can delete all records.');
         if (empty($user[$all ? 'canDeleteAll' : 'canDelete'])) $this->fail(403, 'You do not have permission to request this deletion.');
         $request->merge(['reason' => is_string($request->input('reason')) ? trim($request->input('reason')) : $request->input('reason')]);
         $request->validate(['reason' => 'required|string|max:2000']);
@@ -331,6 +332,7 @@ class TrackerDeletionController extends Controller
     {
         $user = $this->user($request, true);
         $request->validate(['confirmationToken' => 'required|string|size:64', 'confirmed' => 'required|accepted']);
+        \App\Support\TrackerDeletionPassword::verify($request, (int) $user['id']);
         $projects = DB::transaction(function () use ($request, $user) {
             $row = $this->lockedRequest($request);
             if ($row->status !== 'approved' || ! $row->confirmation_hash || ! hash_equals($row->confirmation_hash, hash('sha256', $request->input('confirmationToken')))) {
@@ -367,12 +369,14 @@ class TrackerDeletionController extends Controller
         return [$user, $request->input('targetType'), $request->boolean('all')];
     }
 
-    private function availableDirectRows(string $type, ?array $ids): Collection
+    private function availableDirectRows(string $type, ?array $ids, bool $bulk): Collection
     {
         $rows = $this->lockedRows($type, $ids);
         if ($rows->isEmpty() || ($ids !== null && $rows->count() !== count($ids))) {
             $this->fail(409, 'The selected records changed or no longer exist. Reopen deletion and review them again.');
         }
+        if ($type === 'project' && $bulk) return $rows;
+
         foreach ($rows as $row) {
             $keys = [$type.':'.$row->id];
             if ($type === 'history' && $row->project_id) $keys[] = 'project:'.$row->project_id;
@@ -381,6 +385,36 @@ class TrackerDeletionController extends Controller
             if ($overlap) $this->fail(409, 'A deletion request already covers these records. Review it in Workspace → Deletion requests.');
         }
         return $rows;
+    }
+
+    private function closeRequestsForBulkDeletion(array $user, array $projectIds): void
+    {
+        $requests = DB::table('deletion_requests')->whereIn('status', ['pending', 'approved'])
+            ->whereIn('id', DB::table('deletion_request_targets')->select('request_id')
+                ->whereIn('project_id', $projectIds)->whereNotNull('active_key'))
+            ->orderBy('id')->lockForUpdate()->get(['id', 'status', 'decision_note']);
+
+        foreach ($requests as $request) {
+            $targets = DB::table('deletion_request_targets')->where('request_id', $request->id);
+            $hasRemainingTargets = (clone $targets)->where(function ($query) use ($projectIds) {
+                $query->whereNull('project_id')->orWhereNotIn('project_id', $projectIds);
+            })->exists();
+
+            $changes = ['confirmation_hash' => null];
+            if ($hasRemainingTargets) {
+                $changes['status'] = 'cancelled';
+                $changes['decision_note'] = trim(($request->decision_note ?? '')."\n\nAn Admin deleted part of this selection directly. Submit a new request for any remaining records.");
+            } else {
+                $changes['status'] = 'deleted';
+                $changes['deleted_by'] = json_encode(TrackerHistory::actor($user));
+                $changes['deleted_at'] = now('UTC');
+            }
+            DB::table('deletion_requests')->where('id', $request->id)->update($changes);
+            $targets->update(['active_key' => null]);
+            $this->audit($user, $hasRemainingTargets ? 'deletion.cancelled' : 'deletion.confirmed', $request->id, [
+                'method' => 'admin_direct_bulk', 'previousStatus' => $request->status,
+            ]);
+        }
     }
 
     private function directVersion(string $type, bool $bulk, Collection $rows): string
@@ -392,7 +426,7 @@ class TrackerDeletionController extends Controller
     {
         [, $type, $bulk] = $this->directInput($request);
         return DB::transaction(function () use ($request, $type, $bulk) {
-            $rows = $this->availableDirectRows($type, $bulk ? null : [$request->integer('id')]);
+            $rows = $this->availableDirectRows($type, $bulk ? null : [$request->integer('id')], $bulk);
             $first = json_decode($rows->first()->data, true) ?: [];
             return response()->json(['ok' => true, 'selection' => ['direct' => true, 'targetType' => $type, 'bulk' => $bulk,
                 'targetCount' => $rows->count(), 'title' => $first['title'] ?? $first['action'] ?? 'History record',
@@ -406,7 +440,7 @@ class TrackerDeletionController extends Controller
         [$user, $type, $bulk] = $this->directInput($request);
         $request->validate(['expectedVersion' => 'required|string|size:64', 'reason' => 'nullable|string|max:2000']);
         return DB::transaction(function () use ($request, $user, $type, $bulk) {
-            $rows = $this->availableDirectRows($type, $bulk ? null : [$request->integer('id')]);
+            $rows = $this->availableDirectRows($type, $bulk ? null : [$request->integer('id')], $bulk);
             $version = $this->directVersion($type, $bulk, $rows);
             if (!hash_equals($version, $request->input('expectedVersion'))) $this->fail(409, 'The selected records changed. Reopen deletion and review them again.');
             $token = Str::random(64);
@@ -438,14 +472,16 @@ class TrackerDeletionController extends Controller
             || !hash_equals($prepared['tokenHash'], hash('sha256', $request->input('confirmationToken')))) {
             $this->fail(409, 'Review the records again before confirming deletion. The confirmation is missing or expired.');
         }
+        \App\Support\TrackerDeletionPassword::verify($request, (int) $user['id']);
         $projects = DB::transaction(function () use ($user, $prepared) {
             $type = $prepared['targetType'];
-            $rows = $this->availableDirectRows($type, $prepared['ids']);
+            $rows = $this->availableDirectRows($type, $prepared['ids'], $prepared['bulk']);
             if (!hash_equals($prepared['version'], $this->directVersion($type, $prepared['bulk'], $rows))) {
                 $this->fail(409, 'A record or its history changed. Reopen deletion and review the current records.');
             }
             $ids = $rows->pluck('id')->all();
             if ($type === 'project') {
+                if ($prepared['bulk']) $this->closeRequestsForBulkDeletion($user, $ids);
                 DB::table('history')->whereIn('project_id', $ids)->delete();
                 DB::table('projects')->whereIn('id', $ids)->delete();
             } else DB::table('history')->whereIn('id', $ids)->delete();

@@ -53,7 +53,6 @@ function createServerDatabase(seed) {
             revision++;
         },
         async refresh() {
-            if (window.currentUser?.role === "superadmin") return;
             const sequence = ++refreshSequence, startedRevision = revision;
             const data = await apiClient.getBootstrap();
             // A late read must not replace a newer read or a committed local write.
@@ -127,7 +126,7 @@ window.IDBKeyRange = window.IDBKeyRange || { only: value => ({ __value: value })
 window.initializeDatabase = async function () {
     db = null; window.db = null; window.dbReady = false;
     try {
-        const data = window.currentUser?.role === "superadmin" ? { projects: [], history: [], timelineSettings: {} } : await apiClient.getBootstrap();
+        const data = await apiClient.getBootstrap();
         window.projectHolidayCalendar = data.holidayCalendar || window.projectHolidayCalendar;
             window.timelineDaySettings = data.timelineSettings || {};
         db = createServerDatabase(data); window.db = db; window.dbReady = true;

@@ -5,7 +5,7 @@ const path = require('node:path');
 const root = process.env.TRACKER_SOURCE_ROOT || path.resolve(__dirname, '..');
 function deferred() { let resolve; const promise = new Promise(r => resolve = r); return { promise, resolve }; }
 function setup() {
-    const listeners = {}, elements = {}, classes = new Set();
+    const listeners = {}, elements = {projectFormTabs:{addEventListener(){}},documentForm:{addEventListener(){}}}, classes = new Set();
     const ctx = vm.createContext({ console: { error() {}, warn() {} }, setTimeout, clearTimeout, URLSearchParams,
         Event: class {}, Map, Set, Date, FormData,
         document: { hidden: false, body: { classList: { contains: name => classes.has(name) } },

@@ -19,7 +19,7 @@ class AdminDirectDeletionTest extends TestCase
         DB::statement('CREATE SCHEMA "'.$this->schema.'"'); DB::statement('SET search_path TO "'.$this->schema.'"');
         DB::unprepared(file_get_contents(database_path('lgu_project_tracker_schema.sql')));
         foreach([1=>'staff',2=>'admin',3=>'admin',4=>'superadmin'] as $id=>$role) {
-            DB::table('users')->insert(['id'=>$id,'username'=>'direct'.$id,'full_name'=>'Direct '.$id,'role'=>$role,'active'=>true,'can_delete'=>true,'can_delete_all'=>true,'password_hash'=>'fixture']);
+            DB::table('users')->insert(['id'=>$id,'username'=>'direct'.$id,'full_name'=>'Direct '.$id,'role'=>$role,'active'=>true,'can_delete'=>true,'can_delete_all'=>true,'password_hash'=>password_hash('direct-fixture-password', PASSWORD_BCRYPT)]);
             DB::table('tracker_account_sessions')->insert(['user_id'=>$id,'token_hash'=>hash('sha256','direct-account-'.$id),'started_at'=>time(),'last_activity_at'=>time()]);
         }
         $this->projectId=$this->project('Admin direct project');
@@ -46,7 +46,7 @@ class AdminDirectDeletionTest extends TestCase
         return $this->api(['action'=>'prepareDirect','expectedVersion'=>$preview['version'],'reason'=>$reason]+$target)->assertOk()->json('confirmationToken');
     }
     private function confirm(string $token,array $replace=[]) {
-        return $this->api($replace+['action'=>'confirmDirect','confirmationToken'=>$token,'confirmed'=>true]);
+        return $this->api($replace+['action'=>'confirmDirect','confirmationToken'=>$token,'confirmed'=>true,'current_password'=>'direct-fixture-password']);
     }
     public function test_admin_review_and_final_confirmation_delete_without_a_pending_request(): void {
         $directory=config('tracker.attachments').'/'.$this->projectId; if(!is_dir($directory)) mkdir($directory,0750,true);
@@ -112,6 +112,62 @@ class AdminDirectDeletionTest extends TestCase
         $this->assertDatabaseCount('projects',1);$this->assertDatabaseCount('history',1);$this->assertDatabaseHas('history',['id'=>$other]);
         $this->assertSame(1,DB::table('audit_log')->where('action','history.deleted')->count());
     }
+
+    public function test_bulk_deletion_closes_pending_and_approved_requests_after_confirmation(): void
+    {
+        $archived = $this->project('Archived project');
+        DB::table('projects')->where('id', $archived)->update(['archived_at' => now()]);
+        $archivedLog = DB::table('history')->insertGetId([
+            'project_id' => $archived, 'data' => '{"action":"Archived"}', 'updated_at' => now(),
+        ]);
+
+        $this->userId = 1;
+        $pending = $this->api(['action' => 'create', 'reason' => 'Remove project'] + $this->target())
+            ->assertStatus(202)->json('requestId');
+        $approved = $this->api(['action' => 'create', 'reason' => 'Remove archive log', 'targetType' => 'history', 'id' => $archivedLog])
+            ->assertStatus(202)->json('requestId');
+
+        $this->userId = 2;
+        $version = $this->authenticated()->getJson('/api/deletion-requests.php?id='.$approved)
+            ->assertOk()->json('request.version');
+        $oldToken = $this->api(['action' => 'review', 'id' => $approved, 'decision' => 'approve', 'expectedVersion' => $version])
+            ->assertOk()->json('confirmationToken');
+        $token = $this->prepare(['all' => true]);
+        $this->assertDatabaseHas('deletion_requests', ['id' => $pending, 'status' => 'pending']);
+        $this->assertDatabaseHas('deletion_requests', ['id' => $approved, 'status' => 'approved']);
+        $this->assertDatabaseCount('projects', 2);
+
+        $this->confirm($token)->assertOk();
+        $this->assertDatabaseCount('projects', 0);
+        $this->assertDatabaseCount('history', 0);
+        $this->assertDatabaseCount('deletion_requests', 2);
+        foreach ([$pending, $approved] as $id) {
+            $this->assertDatabaseHas('deletion_requests', ['id' => $id, 'status' => 'deleted', 'confirmation_hash' => null]);
+            $this->assertDatabaseHas('deletion_request_targets', ['request_id' => $id, 'active_key' => null]);
+            $this->assertDatabaseHas('audit_log', ['action' => 'deletion.confirmed', 'entity_id' => $id, 'actor_id' => 2]);
+        }
+        $this->api(['action' => 'confirm', 'id' => $approved, 'confirmationToken' => $oldToken, 'confirmed' => true, 'current_password' => 'direct-fixture-password'])->assertConflict();
+    }
+
+    public function test_bulk_deletion_closes_partially_overlapping_request_without_deleting_later_project(): void
+    {
+        $token = $this->prepare(['all' => true]);
+        $later = $this->project('Project added after review');
+        $this->userId = 3;
+        $requestId = $this->api(['action' => 'create', 'reason' => 'Remove both', 'targetType' => 'project', 'all' => true])
+            ->assertStatus(202)->json('requestId');
+
+        $this->userId = 2;
+        $this->confirm($token)->assertOk();
+        $this->assertDatabaseCount('projects', 1);
+        $this->assertDatabaseHas('projects', ['id' => $later]);
+        $this->assertDatabaseHas('deletion_requests', ['id' => $requestId, 'status' => 'cancelled', 'confirmation_hash' => null]);
+        $this->assertFalse(DB::table('deletion_request_targets')->where('request_id', $requestId)->whereNotNull('active_key')->exists());
+
+        $this->userId = 1;
+        $this->api(['action' => 'create', 'reason' => 'Review the remaining project', 'targetType' => 'project', 'id' => $later])->assertStatus(202);
+    }
+
     public function test_a_new_staff_request_blocks_direct_confirmation_and_is_preserved(): void {
         $token=$this->prepare();$this->userId=1;
         $requestId=$this->api(['action'=>'create','reason'=>'Staff reason']+$this->target())->assertStatus(202)->json('requestId');

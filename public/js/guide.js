@@ -1,6 +1,6 @@
 /* One readable guide for the signed-in role, with exact main-page control locations. */
 (() => {
-    const titles={staff:'Staff guide',admin:'Admin guide',superadmin:'Superadmin guide'};
+    const titles={staff:'Staff guide',admin:'Admin guide'};
     window.refreshRoleGuide=()=>{
         const user=window.currentUser,role=user?.role;
         let active=null;

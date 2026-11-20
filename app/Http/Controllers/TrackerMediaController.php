@@ -56,13 +56,13 @@ class TrackerMediaController extends Controller
                 if ($savedVersion !== '' && ($clientVersion === '' || ! hash_equals($savedVersion, $clientVersion))) {
                     throw new \DomainException('This project was updated by another user. Refresh before saving.');
                 }
-                \App\Support\TrackerProjectInput::validateDates($incoming, $before);
+                \App\Support\TrackerProjectInput::validateDates(array_replace($before, $incoming), $before);
                 $record = $incoming;
                 unset($record['id'], $record['actor'], $record['attachments'], $record['archivedAt'], $record['archivedBy']);
                 $record = \App\Support\TrackerProjectInput::normalize(array_replace($before, $record));
                 \App\Support\TrackerProjectInput::validateAlertPermission($record,$before,!empty($user['canResolveAlerts']));
                 \App\Support\TrackerProjectInput::validateManualResolution($record, $before);
-                if (strtolower(trim((string) ($record['status'] ?? ''))) === 'completed' && ! TrackerDataController::validProjectDate($record['completion'] ?? null)) {
+                if (($record['statusMode'] ?? '') !== 'manual' && strtolower(trim((string) ($record['status'] ?? ''))) === 'completed' && ! TrackerDataController::validProjectDate($record['completion'] ?? null)) {
                     $legacyUndated = strtolower(trim((string) ($before['status'] ?? ''))) === 'completed'
                         && trim((string) ($before['completion'] ?? '')) === ''
                         && trim((string) ($record['completion'] ?? '')) === '';
@@ -94,8 +94,7 @@ class TrackerMediaController extends Controller
                 $record['updatedBy'] = $user['username'];
                 $record['updatedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
                 DB::table('projects')->where('id', $projectId)->update(['data' => json_encode($record, JSON_UNESCAPED_UNICODE)] + TrackerDataController::projectColumns($record) + ['updated_by' => $user['id'], 'updated_at' => now()]);
-                $history = ['projectId' => $projectId, 'editedAt' => now('UTC')->format('Y-m-d\TH:i:s.u\Z'), 'changes' => json_encode($before, JSON_UNESCAPED_UNICODE), 'updatedBy' => $user['username'], 'actor' => TrackerHistory::actor($user)];
-                DB::table('history')->insert(['data' => json_encode($history, JSON_UNESCAPED_UNICODE), 'project_id' => $projectId, 'event_at' => now(), 'updated_by' => $user['id'], 'updated_at' => now()]);
+                TrackerHistory::append($projectId, $before, $record, $user, 'Edited');
                 DB::table('audit_log')->insert(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => 'project.saved', 'entity_type' => 'project', 'entity_id' => $projectId, 'summary' => 'Saved project: '.$record['title'], 'created_at' => now()]);
 
                 return $record;
@@ -168,7 +167,7 @@ class TrackerMediaController extends Controller
         if ($request->isMethod('get')) {
             $request->validate(['userId'=>['sometimes','integer','min:1']]);
             $id = (int) $request->query('userId', $user['id']);
-            if ($id !== (int) $user['id'] && ($user['role'] ?? '') !== 'superadmin') {
+            if ($id !== (int) $user['id'] && ($user['role'] ?? '') !== 'admin') {
                 return response()->json(['ok' => false, 'message' => 'Not allowed.'], 403);
             }
             $photo = basename((string) DB::table('users')->where('id', $id)->value('profile_photo'));

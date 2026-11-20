@@ -24,7 +24,7 @@ class GuideAndStatusUpdateTest extends TestCase
         DB::statement('CREATE SCHEMA "'.$this->schema.'"');
         DB::statement('SET search_path TO "'.$this->schema.'"');
         DB::unprepared(file_get_contents(database_path('lgu_project_tracker_schema.sql')));
-        foreach ([1 => 'staff', 2 => 'staff', 3 => 'superadmin'] as $id => $role) {
+        foreach ([1 => 'staff', 2 => 'staff', 3 => 'admin'] as $id => $role) {
             DB::table('users')->insert(['id' => $id, 'username' => 'fixture'.$id, 'full_name' => 'Fixture '.$id,
                 'role' => $role, 'active' => true, 'can_create' => true, 'can_edit' => true, 'password_hash' => 'fixture']);
         }
@@ -79,7 +79,7 @@ class GuideAndStatusUpdateTest extends TestCase
     public function test_regular_save_and_attachment_save_persist_the_new_rule_and_filter_correctly(): void
     {
         $data = ['title' => 'Inspection before contract due', 'approvedBudget' => '1000', 'biddingDate' => '2026-10-01',
-            'contractRef' => '2026-10-05', 'contractDuration' => 100, 'finalInspection' => '2026-10-09', 'status' => 'Pre-inspection'];
+            'contractRef' => '2026-10-05', 'contractDuration' => 100, 'preInspection' => '2026-10-08', 'finalInspection' => '2026-10-09', 'status' => 'Pre-inspection'];
         $record = $this->postApi('data.php', ['action' => 'saveProject', 'record' => $data])->assertOk()->assertJsonPath('record.status', 'Pending')->json('record');
         $this->assertSame('Pending', DB::table('projects')->where('id', $record['id'])->value('project_status'));
         $this->withSession($this->session)->getJson('/api/data.php?action=listProjects&status=Pending')->assertOk()->assertJsonPath('totalRecords', 1);

@@ -9,12 +9,12 @@ use Illuminate\Support\Facades\Hash;
 class BootstrapCloud extends Command
 {
     protected $signature = 'tracker:bootstrap-cloud';
-    protected $description = 'Create the first superadmin in an empty cloud database from private environment variables';
+    protected $description = 'Create the first administrator in an empty cloud database from private environment variables';
 
     public function handle(): int
     {
         return DB::transaction(function (): int {
-            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ['tracker:create-superadmin']);
+            DB::select('SELECT pg_advisory_xact_lock(hashtext(?))', ['tracker:create-administrator']);
             if (DB::table('users')->exists()) {
                 $this->info('Existing accounts retained. Cloud bootstrap skipped.');
                 return self::SUCCESS;
@@ -27,9 +27,9 @@ class BootstrapCloud extends Command
                 $this->error('Set a valid TRACKER_BOOTSTRAP_NAME, USERNAME and PASSWORD in the private service environment. The password needs at least 12 characters and at most 72 bytes.');
                 return self::FAILURE;
             }
-            DB::table('users')->insert(['username'=>$username, 'full_name'=>$name, 'password_hash'=>Hash::make($password), 'password_encrypted'=>\Illuminate\Support\Facades\Crypt::encryptString($password),
-                'role'=>'superadmin', 'active'=>true, 'created_at'=>now()]);
-            $this->info('First cloud superadmin created. Remove the bootstrap password from the service environment.');
+            DB::table('users')->insert(['username'=>$username, 'full_name'=>$name, 'password_hash'=>Hash::make($password), 'password_encrypted'=>null,
+                'role'=>'admin', 'active'=>true, 'created_at'=>now()]);
+            $this->info('First cloud administrator created. Remove the bootstrap password from the service environment.');
             return self::SUCCESS;
         });
     }

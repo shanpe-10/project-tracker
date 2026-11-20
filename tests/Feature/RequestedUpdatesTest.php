@@ -22,8 +22,8 @@ class RequestedUpdatesTest extends TestCase
         DB::statement('CREATE SCHEMA "'.$this->schema.'"');
         DB::statement('SET search_path TO "'.$this->schema.'"');
         DB::unprepared(file_get_contents(database_path('lgu_project_tracker_schema.sql')));
-        foreach (['admin','superadmin','staff'] as $i=>$role) {
-            $values = ['id'=>$i+1,'username'=>$role,'full_name'=>$role,'password_hash'=>password_hash('test-password-12',PASSWORD_BCRYPT),'role'=>$role,'active'=>true];
+        foreach (['admin','admin','staff'] as $i=>$role) {
+            $values = ['id'=>$i+1,'username'=>$role.($i===1?'2':''),'full_name'=>$role,'password_hash'=>password_hash('test-password-12',PASSWORD_BCRYPT),'role'=>$role,'active'=>true];
             foreach (['can_create','can_edit','can_import','can_export','can_delete','can_delete_all','can_resolve_alerts','can_archive'] as $permission) $values[$permission]=true;
             DB::table('users')->insert($values);
         }
@@ -145,13 +145,11 @@ class RequestedUpdatesTest extends TestCase
         $this->asUser(1);
     }
 
-    public function test_admin_has_full_project_access_by_default_and_cannot_manage_accounts(): void
+    public function test_admin_has_full_project_access_by_default_and_staff_cannot_manage_accounts(): void
     {
         $record=$this->project();
-        foreach ([1,3] as $id) {
-            $this->asUser($id);
-            foreach (['listManagedUsers','createUser','updateUser','deleteUser','setUserPermission','approveUser','rejectUser'] as $action) $this->api(['action'=>$action,'id'=>3],'auth.php')->assertForbidden();
-        }
+        $this->asUser(3);
+        foreach (['listManagedUsers','createUser','updateUser','deleteUser','setUserPermission','approveUser','rejectUser'] as $action) $this->api(['action'=>$action,'id'=>3],'auth.php')->assertForbidden();
         $this->asDefaultAdmin();
         $user=$this->api(['action'=>'session'],'auth.php')->assertOk()->json('user');
         foreach (['canCreate','canEdit','canImport','canExport','canDelete','canDeleteAll','canResolveAlerts','canArchive'] as $permission) $this->assertTrue($user[$permission], $permission);
@@ -181,15 +179,15 @@ class RequestedUpdatesTest extends TestCase
         $record=$this->project();
         $this->asDefaultAdmin();
         $this->withSession($this->session)->withHeader('X-CSRF-Token','request-token');
-        $this->confirmDirectFixture(['targetType'=>'project','id'=>$record['id']])->assertOk();
+        $this->confirmDirectFixture(['targetType'=>'project','id'=>$record['id']], 'test-password-12')->assertOk();
         $this->assertSame(0,DB::table('projects')->count());
         $this->project(['projectNo'=>'124']);
-        $this->confirmDirectFixture(['targetType'=>'project','all'=>true])->assertOk();
+        $this->confirmDirectFixture(['targetType'=>'project','all'=>true], 'test-password-12')->assertOk();
         $this->assertSame(0,DB::table('projects')->count());
         $this->assertSame(1,(int)DB::table('project_number_sequences')->where('sequence_name','projects')->value('next_number'));
     }
 
-    public function test_superadmin_crud_role_changes_and_self_protection(): void
+    public function test_admin_crud_role_changes_and_self_protection(): void
     {
         $this->asUser(2);
         $this->api(['action'=>'listManagedUsers'],'auth.php')->assertOk()->assertJsonCount(3,'users');
@@ -199,25 +197,11 @@ class RequestedUpdatesTest extends TestCase
         $this->api(['action'=>'updateUser','id'=>$id,'username'=>'new.staff','fullName'=>'Edited Admin','role'=>'admin','active'=>true],'auth.php')->assertOk();
         $this->assertSame($hash,DB::table('users')->where('id',$id)->value('password_hash'));
         $this->api(['action'=>'deleteUser','id'=>2],'auth.php')->assertStatus(422);
-        $this->api(['action'=>'updateUser','id'=>2,'username'=>'superadmin','fullName'=>'Superadmin','role'=>'staff','active'=>true],'auth.php')->assertStatus(422);
+        $this->api(['action'=>'updateUser','id'=>2,'username'=>'admin2','fullName'=>'Admin','role'=>'staff','active'=>true],'auth.php')->assertStatus(422);
         $this->api(['action'=>'deleteUser','id'=>$id],'auth.php')->assertOk();
         $this->assertNull(DB::table('users')->where('id',$id)->first());
-        $this->api(['action'=>'listAuditLog'],'auth.php')->assertForbidden();
-        $this->api(['action'=>'saveTimelineSettings','settings'=>[]])->assertForbidden();
-        $this->withSession($this->session)->getJson('/api/backups.php')->assertForbidden();
-    }
-
-    public function test_superadmin_is_limited_to_account_management_and_own_profile(): void
-    {
-        $record=$this->project();
-        $this->asUser(2);
-        foreach (['', '?action=dashboard', '?action=notifications', '?action=listProjects', '?action=listProjects&format=csv', '?action=listProjects&format=xlsx', '?action=projectHistory&projectId='.$record['id'], '?action=projectAlerts&projectId='.$record['id'], '?action=projectVersion', '?action=nextProjectNumber'] as $query) {
-            $this->withSession($this->session)->getJson('/api/data.php'.$query)->assertForbidden();
-        }
-        $this->withSession($this->session)->getJson('/api/attachments.php?projectId='.$record['id'])->assertForbidden();
-        $this->withSession($this->session)->withHeader('X-CSRF-Token','request-token')->post('/api/project-edit.php',['projectId'=>$record['id'],'record'=>json_encode($record)])->assertForbidden();
-        $this->api(['action'=>'listManagedUsers'],'auth.php')->assertOk();
-        $this->withSession($this->session)->withHeader('X-CSRF-Token','request-token')->post('/api/profile.php',['fullName'=>'IT Superadmin'])->assertOk()->assertJsonPath('user.role','superadmin');
+        $this->api(['action'=>'listAuditLog'],'auth.php')->assertOk();
+        $this->withSession($this->session)->getJson('/api/backups.php')->assertOk();
     }
 
     public function test_revoked_permissions_are_refreshed_and_account_csrf_is_required(): void

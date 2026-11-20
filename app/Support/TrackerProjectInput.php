@@ -3,17 +3,34 @@ namespace App\Support;
 use Illuminate\Validation\ValidationException;
 final class TrackerProjectInput
 {
-    public const DATE_FIELDS = ['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completion'];
+    public const DATE_FIELDS = ['preProcurementDate','preBidDate','biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','materialRequestDate','finalInspection','swa','ldNewCompletionDate','completion'];
+    public const TITLE_LIMIT = 400;
+
+    public static function withoutBlankAdditionalImportFields(array $record): array
+    {
+        foreach (['losingBidder1', 'losingBidAmount1', 'losingBidder2', 'losingBidAmount2', 'referenceNo', 'approvedBudgetWords', 'taker', 'owner', 'bidAmountWords', 'preProcurementDate', 'preBidDate', 'address', 'obreNumber', 'endUserOffice', 'endUserName', 'endUserPosition', 'preInspectionRemarks', 'finalInspectionRemarks', 'physicalAccomplishmentRemarks', 'materialTestingAmount', 'materialRequestDate', 'materialTestingRemarks', 'ldRemarks', 'swaRemarks', 'statusMode', 'manualStatus', 'material1', 'material2', 'material3', 'material4', 'material5', 'material6', 'material7', 'material8', 'material9', 'material10', 'liquidatedDamages', 'completionSwaDate', 'releasedBy', 'philgeps', 'physicalAccomplishment'] as $key) {
+            if (array_key_exists($key, $record) && ($record[$key] === null || (is_string($record[$key]) && trim($record[$key]) === ''))) unset($record[$key]);
+        }
+        return $record;
+    }
 
     public static function normalize(array $record): array
     {
+        unset($record['autoProjectNumber']);
+        $record = TrackerProjectRevision::normalizeFields($record);
         $days = TrackerMilestones::duration($record['contractDuration'] ?? null);
         if ($days !== null) $record['contractDuration'] = $days;
         if ($days !== null && TrackerMilestones::date($record['contractRef'] ?? null)) {
             $record['contractEndDate'] = TrackerMilestones::dueDates($record)['contractDueDate'];
         }
-        $record['status'] = self::automaticStatus($record);
+        $record['status'] = self::effectiveStatus($record);
         return $record;
+    }
+
+    public static function effectiveStatus(array $record, ?\DateTimeImmutable $today = null): string
+    {
+        if (($record['statusMode'] ?? '') === 'manual' && in_array($record['manualStatus'] ?? $record['status'] ?? null, TrackerProjectRevision::STATUSES, true)) return $record['manualStatus'] ?? $record['status'];
+        return self::automaticStatus($record, $today);
     }
 
     public static function automaticStatus(array $record, ?\DateTimeImmutable $today = null): string
@@ -22,8 +39,8 @@ final class TrackerProjectInput
         $today = $today ?? now('Asia/Manila')->startOfDay()->toDateTimeImmutable();
         $swa = TrackerMilestones::date($record['swa'] ?? null);
         $completion = TrackerMilestones::date($record['completion'] ?? null);
-        if (($swa && $swa->format('Y-m-d') <= $today->format('Y-m-d')) || (!$swa && $status === 'released')) return 'Released';
-        if (($completion && $completion->format('Y-m-d') <= $today->format('Y-m-d')) || (!$completion && $status === 'completed')) return 'Completed';
+        if (($swa && $swa->format('Y-m-d') <= $today->format('Y-m-d')) || (!$swa && $status === 'released' && ($record['statusMode'] ?? '') !== 'automatic')) return 'Released';
+        if (($completion && $completion->format('Y-m-d') <= $today->format('Y-m-d')) || (!$completion && $status === 'completed' && ($record['statusMode'] ?? '') !== 'automatic')) return 'Completed';
         if(TrackerMilestones::date($record['finalInspection']??null)) return 'Pending';
         $end=TrackerMilestones::date(TrackerMilestones::dueDates($record)['contractDueDate']);
         $today=$today??new \DateTimeImmutable('today',new \DateTimeZone('Asia/Manila'));
@@ -34,6 +51,9 @@ final class TrackerProjectInput
 
     public static function validateDates(array $record, array $previous = []): void
     {
+        TrackerProjectRevision::validateFields($record, $previous);
+        $record = TrackerProjectRevision::normalizeFields($record);
+        self::validateInspectionSequence($record, $previous);
         foreach (self::DATE_FIELDS as $key) {
             $value = $record[$key] ?? '';
             if (in_array($key, ['completion','swa'], true) && TrackerMilestones::date($value)
@@ -48,6 +68,18 @@ final class TrackerProjectInput
             if (! TrackerMilestones::isWorkday(TrackerMilestones::date($value))) {
                 throw ValidationException::withMessages([$key => "$key falls on a non-working weekday or excluded holiday. Choose a working date."]);
             }
+        }
+    }
+
+    public static function validateInspectionSequence(array $record, array $previous = []): void
+    {
+        foreach ([['finalInspection', 'preInspection', 'Record Pre-Inspection before entering Final Inspection.'],
+            ['completion', 'finalInspection', 'Record Final Inspection before entering Completion Date.']] as [$field, $required, $message]) {
+            if (! TrackerMilestones::date($record[$field] ?? null) || TrackerMilestones::date($record[$required] ?? null)) continue;
+            // Existing incomplete historical records can be retained, but not introduced or changed.
+            if (($record[$field] ?? '') === ($previous[$field] ?? '')
+                && ($record[$required] ?? '') === ($previous[$required] ?? '')) continue;
+            throw ValidationException::withMessages([$field => $message]);
         }
     }
 
@@ -77,29 +109,38 @@ final class TrackerProjectInput
 
     public static function validate(array $record): void
     {
+        foreach (TrackerProjectFields::fields() as $field) {
+            $value = $record[$field['key']] ?? null;
+            if ($value !== null && !is_scalar($value)) throw ValidationException::withMessages([$field['key']=>$field['label'].' must be a single value.']);
+        }
+        $record = TrackerProjectRevision::normalizeFields($record);
+        if (isset($record['autoProjectNumber']) && !is_bool($record['autoProjectNumber'])) throw ValidationException::withMessages(['autoProjectNumber'=>'The automatic project number option must be true or false.']);
         if (isset($record['id']) && filter_var($record['id'], FILTER_VALIDATE_INT, ['options'=>['min_range'=>0]]) === false) throw ValidationException::withMessages(['id'=>'Invalid record ID.']);
-        foreach (['biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','finalInspection','swa','ldNewCompletionDate','completion','updatedAt'] as $key) {
+        foreach (['preProcurementDate','preBidDate','biddingDate','prDate','obre','resolutionDate','noticePostQual','noa','noaDueDate','performanceBond','contractRef','ntpDate','dole','contractEndDate','preInspection','materialTestingDate','materialRequestDate','finalInspection','swa','ldNewCompletionDate','completion','updatedAt'] as $key) {
             if (isset($record[$key]) && !is_string($record[$key])) throw ValidationException::withMessages([$key=>"$key must be a date string."]);
         }
         $duration = $record['contractDuration'] ?? null;
         if ($duration !== null && $duration !== '' && TrackerMilestones::duration($duration) === null) {
             throw ValidationException::withMessages(['contractDuration'=>'Contract duration must be a positive numeric value in working days (Monday–Friday) (up to 36500).']);
         }
-        $limits = ['projectNo'=>60,'title'=>255,'status'=>100,'winningBidder'=>255,'sourceOfFund'=>160,'prNumber'=>120];
+        $limits = ['losingBidder1'=>255,'losingBidder2'=>255,'referenceNo'=>120,'approvedBudgetWords'=>2000,'taker'=>255,'owner'=>255,'bidAmountWords'=>2000,'liquidatedDamages'=>2000,'completionSwaDate'=>255,'releasedBy'=>255,'philgeps'=>255,'physicalAccomplishment'=>255,'projectNo'=>60,'title'=>self::TITLE_LIMIT,'status'=>100,'winningBidder'=>255,'sourceOfFund'=>160,'prNumber'=>120];
         foreach ($limits as $key=>$max) {
             if (isset($record[$key]) && (!is_scalar($record[$key]) || mb_strlen(trim((string)$record[$key])) > $max)) {
                 throw ValidationException::withMessages([$key=>"$key must be text of up to $max characters."]);
             }
         }
-        foreach (['approvedBudget','bidAmount','ldAmount'] as $key) {
+        foreach (['approvedBudget','bidAmount','materialTestingAmount','losingBidAmount1','losingBidAmount2'] as $key) {
             if (!isset($record[$key]) || $record[$key] === '' || $record[$key] === '-') continue;
             if (!is_string($record[$key]) && !is_int($record[$key]) && !is_float($record[$key])) throw ValidationException::withMessages([$key=>"Invalid $key amount."]);
+            $acceptsStatus = str_starts_with($key, 'losingBidAmount');
+            if ($acceptsStatus && in_array(strtoupper(trim((string) $record[$key])), ['N/A', 'DQ'], true)) continue;
             $value=preg_replace('/[₱$,\s]/u','',(string)$record[$key]);
             if (!preg_match('/^\d+(\.\d{1,2})?$/D',$value) || strlen(ltrim(explode('.',$value)[0],'0')) > 13) {
-                throw ValidationException::withMessages([$key=>"$key must be a non-negative amount with up to 13 integer digits and two decimal places."]);
+                $options = $acceptsStatus ? ', N/A, or DQ' : '';
+                throw ValidationException::withMessages([$key=>"$key must be a non-negative amount with up to 13 integer digits and two decimal places$options."]);
             }
         }
-        foreach (['ldNoOfDays','ldActualDuration'] as $key) {
+        foreach (['ldActualDuration'] as $key) {
             $value = $record[$key] ?? '';
             if ($value === null || $value === '' || $value === '-') continue;
             if ((!is_string($value) && !is_int($value) && !is_float($value)) || !preg_match('/^(?:\d+(?:\.\d*)?|\.\d+)$/D', trim((string)$value))

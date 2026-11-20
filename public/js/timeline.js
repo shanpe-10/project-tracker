@@ -8,7 +8,7 @@
    ========================================================================== */
 
 const TIMELINE_DAY_SETTINGS_KEY = "offlineDocManager.timelineDaySettings";
-const timelineDayDefaults = { noa: 10, ntp: 30, material: 15, completion: 15, finalInspection: 7, bidding: 15 };
+const timelineDayDefaults = { noa: 10, ntp: 30, material: 15, completion: 15, finalInspection: 7, bidding: 15, contractEnd: 7 };
 let dashboardCompletionYear = "";
 let dashboardStatusMonth = "";
 let dashboardStatusYear = "";
@@ -34,6 +34,7 @@ function getProjectMilestoneAlerts(project, today = timelineCalendarDay(new Date
     append("ntpDueDate", "ntpDate", "ntp-due", "ntp-due-overdue", "Notice to Proceed", getTimelineDays("bidding"));
     append("materialTestingDueDate", "materialTestingDate", "material-test", "material-overdue", "Material Testing", getTimelineDays("bidding"));
     append("finalInspectionDueDate", "finalInspection", "final-inspection", "final-inspection-overdue", "Final Inspection", getTimelineDays("finalInspection"));
+    append("contractEndReminderDate", "completion", "contract-end", "contract-end-overdue", "Contract End Follow-up", 0);
     return alerts;
 }
 
@@ -110,7 +111,7 @@ function loadTimelineLeadTimes() {
 
 function saveTimelineLeadTimes() {
     const settings = { ntp: getTimelineDays("ntp"), material: getTimelineDays("material") };
-    for (const type of ["noa", "bidding", "completion", "finalInspection"]) {
+    for (const type of ["noa", "bidding", "completion", "finalInspection", "contractEnd"]) {
         const name = type[0].toUpperCase() + type.slice(1);
         const select = document.getElementById(`timelineLead${name}`);
         const input = document.getElementById(`timelineLead${name}Custom`);
@@ -968,6 +969,7 @@ function resetResolvedAlertsFilters() {
 }
 
 function resolvedAlertCategory(type) {
+    if (type.startsWith("contract-end")) return "award";
     if (type.startsWith("pre-inspection")) return "preInspection";
     if (type.startsWith("final-inspection")) return "finalInspection";
     if (type.startsWith("noa")) return "noa";
@@ -1102,10 +1104,12 @@ function getAutomaticTimelineResolutions(project, today = timelineCalendarDay(ne
         ["preInspection", "pre-inspection", "Pre-inspection deadline", ["pre-inspection", "pre-inspection-overdue"], dates.preInspectionDueDate],
         ["ntpDate", "ntp-due", "NTP issuance deadline", ["ntp-due", "ntp-due-overdue", "ntp-award", "ntp-overdue"], dates.ntpDueDate],
         ["materialTestingDate", "material-test", "Material testing deadline", ["material-test", "material-overdue"], dates.materialTestingDueDate],
+        ["completion", "contract-end", "Contract End Follow-up", ["contract-end", "contract-end-overdue"], dates.contractEndReminderDate],
         ["finalInspection", "final-inspection", "Final inspection deadline", ["final-inspection", "final-inspection-overdue"], dates.finalInspectionDueDate],
         ["swa", "award-overdue", "SWA contractor follow-up", ["award-close", "award-overdue"], getSwaDueDateValue(project.completion)]
     ];
     return definitions.flatMap(([field, type, label, aliases, dueDate]) => {
+        if (type === 'contract-end' && !dueDate) return [];
         const date = projectCalendarDate(project[field]);
         if (!date || !today || project[field] > today) return [];
         if (field === "materialTestingDate" && !dueDate) {
@@ -1125,7 +1129,7 @@ function resolvedTimelineEntries(project, today = timelineCalendarDay(new Date()
         if (projectCalendarDate(project.completion) && project.completion <= today) types.push("award-overdue");
         if (!types.length) types = ["resolved-general"];
     }
-    const labels = {"noa-due":"NOA issuance deadline","noa-due-overdue":"NOA issuance deadline","noa-warning":"NOA issuance deadline","noa-active":"NOA issuance deadline","noa-overdue":"NOA issuance deadline","ntp-award":"NTP issuance deadline","ntp-overdue":"NTP issuance deadline","ntp-due":"NTP issuance deadline","ntp-due-overdue":"NTP issuance deadline","material-test":"Material testing deadline","material-overdue":"Material testing deadline","award-close":"SWA contractor reminder","award-overdue":"SWA contractor follow-up","pre-inspection":"Pre-inspection deadline","pre-inspection-overdue":"Pre-inspection deadline","final-inspection":"Final inspection deadline","final-inspection-overdue":"Final inspection deadline","resolved-general":"Resolved timeline alert"};
+    const labels = {"contract-end":"Contract End Follow-up","contract-end-overdue":"Contract End Follow-up","noa-due":"NOA issuance deadline","noa-due-overdue":"NOA issuance deadline","noa-warning":"NOA issuance deadline","noa-active":"NOA issuance deadline","noa-overdue":"NOA issuance deadline","ntp-award":"NTP issuance deadline","ntp-overdue":"NTP issuance deadline","ntp-due":"NTP issuance deadline","ntp-due-overdue":"NTP issuance deadline","material-test":"Material testing deadline","material-overdue":"Material testing deadline","award-close":"SWA contractor reminder","award-overdue":"SWA contractor follow-up","pre-inspection":"Pre-inspection deadline","pre-inspection-overdue":"Pre-inspection deadline","final-inspection":"Final inspection deadline","final-inspection-overdue":"Final inspection deadline","resolved-general":"Resolved timeline alert"};
     const entries = types.map(type => {
         const auto = automatic.find(item => item.aliases.includes(type));
         return {project, type, label: labels[type] || type.replace(/-/g, " "), doneDate: project.timelineMarkedDoneDate, ...(auto ? {...auto, type} : {})};
@@ -1365,17 +1369,11 @@ window.notificationAlertTotal = 0;
 let notificationRequestSequence = 0;
 async function refreshGlobalNotifications() {
     if (!window.currentUser || !window.apiClient) return;
-    if (window.currentUser.role === "superadmin") {
-        window.projectNotificationGroups = [];
-        window.notificationAlertTotal = 0;
-        renderServerDashboardNotifications();
-        return;
-    }
     const userId = window.currentUser.id;
     const sequence = ++notificationRequestSequence;
     try {
         const result = await apiClient.getNotifications();
-        if (sequence !== notificationRequestSequence || userId !== window.currentUser?.id || window.currentUser?.role === "superadmin") return;
+        if (sequence !== notificationRequestSequence || userId !== window.currentUser?.id) return;
         window.projectNotificationGroups = result.groups || [];
         window.notificationAlertTotal = Number(result.alertTotal) || 0;
         renderServerDashboardNotifications();
@@ -1383,14 +1381,14 @@ async function refreshGlobalNotifications() {
 }
 
 function renderServerDashboardNotifications() {
-    const pending = window.currentUser?.role === "superadmin" ? window.pendingAccountRequests || [] : [];
+    const pending = window.currentUser?.role === "admin" ? window.pendingAccountRequests || [] : [];
     const list = document.getElementById("notificationList");
     if (list) {
         const accounts = pending.length ? `<li class="notification-project-row"><span>${pending.length} account requests awaiting approval</span><button class="btn btn-sm btn-primary" onclick="openPendingAccountRequests()">Review</button></li>` : "";
-        list.innerHTML = accounts + (window.currentUser?.role === "superadmin" ? [] : window.projectNotificationGroups || []).map(group => `<li class="notification-project-row"><div><button type="button" class="notification-project-link" onclick="openNotificationProject(${Number(group.project.id)}, event)" aria-haspopup="dialog" aria-controls="projectDetailsModal">${escapeHtml(group.project.title || "Untitled project")}</button><span>${group.alerts.length} alerts · ${escapeHtml([...new Set(group.alerts.map(item => item.label))].join(", "))}</span></div><button type="button" class="project-alert-button btn btn-sm btn-outline-danger" data-project-alerts-id="${Number(group.project.id)}" aria-haspopup="dialog" aria-expanded="false" aria-controls="projectDetailsModal projectAlertsPanel" onclick="openNotificationProject(${Number(group.project.id)}, event, true)">Alerts</button></li>`).join("") || '<li class="text-muted text-center p-3">No notifications found.</li>';
+        list.innerHTML = accounts + (window.projectNotificationGroups || []).map(group => `<li class="notification-project-row"><div><button type="button" class="notification-project-link" onclick="openNotificationProject(${Number(group.project.id)}, event)" aria-haspopup="dialog" aria-controls="projectDetailsModal">${escapeHtml(group.project.title || "Untitled project")}</button><span>${group.alerts.length} alerts · ${escapeHtml([...new Set(group.alerts.map(item => item.label))].join(", "))}</span></div><button type="button" class="project-alert-button btn btn-sm btn-outline-danger" data-project-alerts-id="${Number(group.project.id)}" aria-haspopup="dialog" aria-expanded="false" aria-controls="projectDetailsModal projectAlertsPanel" onclick="openNotificationProject(${Number(group.project.id)}, event, true)">Alerts</button></li>`).join("") || '<li class="text-muted text-center p-3">No notifications found.</li>';
     }
     const count = document.getElementById("notificationCount");
-    if (count) { const total = (window.currentUser?.role === "superadmin" ? 0 : Number(window.notificationAlertTotal) || 0) + pending.length; count.textContent = total; count.classList.toggle("d-none",total === 0); }
+    if (count) { const total = (Number(window.notificationAlertTotal) || 0) + pending.length; count.textContent = total; count.classList.toggle("d-none",total === 0); }
 }
 
 function renderRecentDashboardProjects(docs) {

@@ -55,6 +55,7 @@ class DeletionApprovalTest extends TestCase
             $t->boolean('active')->default(true);
             foreach (['can_create','can_edit','can_import','can_export','can_delete','can_delete_all','can_resolve_alerts','can_archive'] as $name) $t->boolean($name)->default(false);
         });
+        Schema::create('login_attempts', function (Blueprint $t) { $t->string('attempt_key')->primary(); $t->integer('failed_count')->default(0); $t->timestamp('first_failed_at'); $t->timestamp('locked_until')->nullable(); $t->timestamp('updated_at'); });
         Schema::create('tracker_account_sessions', function (Blueprint $t) { $t->unsignedBigInteger('user_id')->primary(); $t->string('token_hash'); $t->bigInteger('started_at'); $t->bigInteger('last_activity_at'); });
         Schema::create('projects', function (Blueprint $t) {
             $t->id(); $t->json('data');
@@ -117,7 +118,7 @@ class DeletionApprovalTest extends TestCase
 
     private function confirm(int $id, string $token)
     {
-        return $this->api(['action' => 'confirm', 'id' => $id, 'confirmationToken' => $token, 'confirmed' => true]);
+        return $this->api(['action' => 'confirm', 'id' => $id, 'confirmationToken' => $token, 'confirmed' => true, 'current_password' => 'fixture-password']);
     }
 
     public function test_staff_request_preserves_projects_history_and_attachments_until_two_admin_steps(): void
@@ -214,6 +215,8 @@ class DeletionApprovalTest extends TestCase
     public function test_legacy_delete_and_bulk_endpoints_create_requests_and_bulk_excludes_later_projects(): void
     {
         $this->authenticated()->postJson('/api/data.php', ['action' => 'deleteProject', 'id' => $this->projectId])->assertUnprocessable();
+        $this->authenticated()->postJson('/api/data.php', ['action' => 'clearStore', 'store' => 'projects', 'reason' => 'Old records'])->assertForbidden();
+        $this->asUser(2);
         $id = $this->authenticated()->postJson('/api/data.php', ['action' => 'clearStore', 'store' => 'projects', 'reason' => 'Old records'])->assertStatus(202)->json('requestId');
         $later = $this->project('Created after request');
         $this->assertDatabaseCount('projects', 2);

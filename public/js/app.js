@@ -12,10 +12,6 @@
 let applicationStarted = false;
 function startApplication() {
     if (!window.dbReady) return;
-    if (window.currentUser?.role === "superadmin") {
-        switchWorkspace("account-requests");
-        return;
-    }
     try {
         restoreLastWorkspace();
         refreshGlobalNotifications();

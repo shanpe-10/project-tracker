@@ -20,7 +20,7 @@ class SharedUpdatesTest extends TestCase
         DB::statement('CREATE SCHEMA "'.$this->schema.'"');
         DB::statement('SET search_path TO "'.$this->schema.'"');
         DB::unprepared(file_get_contents(database_path('lgu_project_tracker_schema.sql')));
-        foreach ([1=>'staff', 2=>'admin', 4=>'staff', 10=>'superadmin', 5=>'superadmin', 12=>'superadmin'] as $id=>$role) {
+        foreach ([1=>'staff', 2=>'admin', 4=>'staff', 10=>'admin', 5=>'admin', 12=>'admin'] as $id=>$role) {
             DB::table('users')->insert(['id'=>$id, 'username'=>'account'.$id, 'full_name'=>'Account '.$id,
                 'role'=>$role, 'active'=>true, 'can_edit'=>true, 'password_hash'=>'fixture',
                 'created_at'=>$id === 10 ? '2020-01-01' : '2021-01-01']);
@@ -59,7 +59,7 @@ class SharedUpdatesTest extends TestCase
     public function test_original_account_is_identified_by_creation_and_rejects_both_deletion_paths(): void
     {
         $users = $this->api('auth.php', ['action'=>'listManagedUsers'])->assertOk()->json('users');
-        $protected = array_values(array_filter($users, fn ($user) => $user['isOriginalSuperadmin']));
+        $protected = array_values(array_filter($users, fn ($user) => $user['isOriginalAdmin']));
         $this->assertCount(1, $protected);
         $this->assertSame(10, $protected[0]['id']);
         foreach (['deleteUser', 'rejectUser'] as $action) {
@@ -79,15 +79,15 @@ class SharedUpdatesTest extends TestCase
         }
         $users = $this->api('auth.php', ['action'=>'listManagedUsers'])->assertOk()->json('users');
         $original = array_values(array_filter($users, fn ($user) => $user['id'] === 10))[0];
-        $this->assertTrue($original['isOriginalSuperadmin']);
+        $this->assertTrue($original['isOriginalAdmin']);
         $this->assertSame('renamed', $original['username']);
-        $this->assertSame(10, json_decode(DB::table('application_settings')->where('setting_key', 'original_superadmin_id')->value('setting_value'), true));
+        $this->assertSame(10, json_decode(DB::table('application_settings')->where('setting_key', 'original_admin_id')->value('setting_value'), true));
     }
 
-    public function test_self_and_last_active_superadmin_guards_are_preserved(): void
+    public function test_self_and_last_active_admin_guards_are_preserved(): void
     {
         $this->api('auth.php', ['action'=>'deleteUser', 'id'=>12])->assertStatus(422);
-        DB::table('users')->whereIn('id', [5, 10])->update(['active'=>false]);
+        DB::table('users')->whereIn('id', [2, 5, 10])->update(['active'=>false]);
         $this->api('auth.php', ['action'=>'updateUser', 'id'=>12, 'username'=>'account12',
             'fullName'=>'Account 12', 'role'=>'staff', 'active'=>true])->assertStatus(422);
     }

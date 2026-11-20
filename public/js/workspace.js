@@ -2,6 +2,22 @@
    WORKSPACE NAVIGATION & APPLICATION UI
    ========================================================================== */
 
+const administrationWorkspaces = {
+    administration: {
+        buttonId: "administrationTabBtn",
+        load() {
+            loadHolidayCalendar();
+            loadBackupSettings();
+            loadTimelineLeadTimes();
+        }
+    },
+    "account-requests": { buttonId: "accountRequestsTabBtn", load: () => loadAccountRequests() },
+    accountability: { buttonId: "accountabilityTabBtn", load: () => loadAuditLog() }
+};
+
+function isAdminWorkspace(workspace) {
+    return workspace === "archive" || Object.hasOwn(administrationWorkspaces, workspace);
+}
 
 /**
  * Switches between the main application workspaces.
@@ -16,8 +32,9 @@
 
  */
 function switchWorkspace(targetWorkspace) {
-    if (window.currentUser?.role === "superadmin") targetWorkspace = "account-requests";
-    if (targetWorkspace === "account-requests" && !["admin", "superadmin"].includes(window.currentUser?.role)) targetWorkspace = "dashboard";
+    if (isAdminWorkspace(targetWorkspace) && window.currentUser?.role !== "admin") {
+        targetWorkspace = "dashboard";
+    }
     const previousWorkspace = activeWorkspace;
     if (previousWorkspace !== targetWorkspace && (["documents", "archive"].includes(previousWorkspace) || ["documents", "archive"].includes(targetWorkspace))) {
         clearTimeout(projectListSearchTimer);
@@ -82,7 +99,7 @@ function switchWorkspace(targetWorkspace) {
         "view-dashboard-done",
         "view-documents",
         "view-archive",
-        "view-account-requests",
+        ...Object.keys(administrationWorkspaces).map(workspace => `view-${workspace}`),
     );
 
 
@@ -147,15 +164,14 @@ function switchWorkspace(targetWorkspace) {
     }
 
     /* =========================================================
-       ACCOUNT REQUESTS (ADMIN ONLY)
+       ADMINISTRATION
        ========================================================= */
-    else if (targetWorkspace === "account-requests") {
-        const button = document.getElementById("accountRequestsTabBtn");
-        if (button) button.classList.add("active");
-        container.classList.add("view-account-requests");
-        if (window.currentUser?.role === "superadmin") loadAccountRequests();
-        if (typeof loadHolidayCalendar === "function") loadHolidayCalendar();
-        if (window.currentUser?.role === "admin") { loadAuditLog(); loadBackupSettings(); loadTimelineLeadTimes(); }
+    else if (Object.hasOwn(administrationWorkspaces, targetWorkspace)) {
+        const workspace = administrationWorkspaces[targetWorkspace];
+        document.getElementById("administrationTabBtn")?.classList.add("active");
+        document.getElementById(workspace.buttonId)?.classList.add("active");
+        container.classList.add(`view-${targetWorkspace}`);
+        workspace.load();
     }
 
 
@@ -197,8 +213,6 @@ function switchWorkspace(targetWorkspace) {
 
         projectLifecycle = targetWorkspace === "archive" ? "archived" : projectLifecycle === "archived" ? "active" : projectLifecycle;
         if (typeof syncProjectStatusOptions === "function") syncProjectStatusOptions();
-        if (typeof updateProjectLifecycleControls === "function") updateProjectLifecycleControls();
-        document.getElementById("projectsLifecycleTabs")?.classList.toggle("d-none", targetWorkspace === "archive");
         document.getElementById("addProjectButton")?.classList.toggle("d-none", targetWorkspace === "archive");
         const pageTitle = document.getElementById("projectsPageTitle");
         const pageDescription = document.getElementById("projectsPageDescription");
@@ -236,6 +250,8 @@ function switchWorkspace(targetWorkspace) {
 
 
 
+    updateProjectLifecycleControls();
+
     /*
      * Re-evaluate the form highlighting after
      * changing workspace visibility.
@@ -267,9 +283,9 @@ function openAddProjectPane() {
 
 function restoreLastWorkspace() {
     const savedWorkspace = sessionStorage.getItem("lguProjectTrackerWorkspace");
-    const allowedWorkspaces = ["dashboard", "dashboard-done", "documents", "archive", "account-requests"];
+    const allowedWorkspaces = ["dashboard", "dashboard-done", "documents", "archive", ...Object.keys(administrationWorkspaces)];
     const workspace = allowedWorkspaces.includes(savedWorkspace) ? savedWorkspace : "dashboard";
-    switchWorkspace(workspace === "account-requests" && !["admin", "superadmin"].includes(window.currentUser?.role) ? "dashboard" : workspace);
+    switchWorkspace(workspace);
 }
 
 

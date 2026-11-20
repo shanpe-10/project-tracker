@@ -75,12 +75,22 @@ function showSharedUpdatesIndicator(show) {
 async function loadNextProjectNumberPreview() {
     const preview = document.getElementById("nextProjectNumberPreview");
     const value = document.getElementById("nextProjectNumberValue");
+    const context = document.getElementById("nextProjectNumberContext");
     if (!preview || !value || editingId !== null) return;
     preview.classList.remove("d-none");
     value.textContent = "Loading…";
+    if (context) context.textContent = '';
     try {
         const result = await apiClient.getNextProjectNumber();
-        if (editingId === null) value.textContent = result.nextProjectNumber || "—";
+        if (editingId === null) {
+            value.textContent = result.nextProjectNumber || "—";
+            if (context) {
+                const archived = Number(result.archivedProjectCount) || 0;
+                context.textContent = archived > 0
+                    ? `${archived} archived project${archived === 1 ? '' : 's'} still reserve${archived === 1 ? 's' : ''} ${archived === 1 ? 'its number' : 'their numbers'}${result.highestArchivedProjectNumber ? ` (highest: #${result.highestArchivedProjectNumber})` : ''}.`
+                    : result.projectCount === 0 ? 'No active or archived projects remain. Numbering starts at 1.' : '';
+            }
+        }
     } catch (error) {
         value.textContent = "Unavailable";
         console.warn("Unable to load the next project number:", error);
@@ -93,11 +103,11 @@ function hideNextProjectNumberPreview() {
 
 function projectScreenIsBusy() {
     return projectSaveInProgress || editingId !== null || document.body.classList.contains("project-edit-pane-open")
-        || window.importInProgress === true || Boolean(document.querySelector("#importPreviewModal.show, #importConflictModal.show, #importProgressModal.show, #projectDuplicateModal.show"));
+        || window.importInProgress === true || Boolean(document.querySelector("#importPreviewModal.show, #importConflictModal.show, #importProgressModal.show, #projectDuplicateModal.show, .project-action-dialog[open]"));
 }
 
 async function refreshSharedProjectData() {
-    if (window.currentUser?.role === "superadmin" || sharedProjectSyncBusy || !db) return;
+    if (sharedProjectSyncBusy || !db) return;
     if (projectScreenIsBusy()) {
         showSharedUpdatesIndicator(true);
         showSystemNotification("Shared changes are waiting. Save or cancel your current changes to load them safely.");
@@ -139,7 +149,7 @@ async function refreshSharedProjectData() {
 }
 
 async function checkForSharedProjectUpdates() {
-    if (window.currentUser?.role === "superadmin" || document.hidden || sharedProjectSyncBusy || sharedProjectCheckBusy || !window.currentUser || !db) return;
+    if (document.hidden || sharedProjectSyncBusy || sharedProjectCheckBusy || !window.currentUser || !db) return;
     sharedProjectCheckBusy = true;
     const database = db;
     try {
@@ -175,14 +185,20 @@ window.addEventListener("focus", checkForSharedProjectUpdates);
 window.addEventListener("online", checkForSharedProjectUpdates);
 
 function updateProjectLifecycleControls() {
-    document.querySelectorAll(".projects-lifecycle-tabs button").forEach(button => button.classList.remove("active"));
-    const selected = document.getElementById(`projectLifecycle${projectLifecycle.charAt(0).toUpperCase()}${projectLifecycle.slice(1)}`);
-    if (selected) selected.classList.add("active");
+    document.querySelectorAll("#projectLifecycleViews [data-project-lifecycle]").forEach(button => {
+        const selected = activeWorkspace === "documents" && button.dataset.projectLifecycle === projectLifecycle;
+        button.classList.toggle("active", selected);
+        button.setAttribute("aria-pressed", String(selected));
+    });
 }
 
 function setProjectLifecycle(lifecycle) {
-    if (!["all", "active", "completed", "released", "alerts", "archived"].includes(lifecycle)) return;
+    if (!["all", "active", "completed", "released", "alerts"].includes(lifecycle)) return;
     projectLifecycle = lifecycle;
+    if (activeWorkspace !== "documents") {
+        switchWorkspace("documents");
+        return;
+    }
     updateProjectLifecycleControls();
     syncProjectStatusOptions();
     currentPage = 1;
@@ -255,7 +271,7 @@ function prepareProjectListForLoad() {
     const info = document.getElementById("paginationInfo");
     const controls = document.getElementById("paginationControls");
     if (table) {
-        table.innerHTML = '<tr class="projects-loading-row"><td colspan="8"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Loading projects…</span></td></tr>';
+        table.innerHTML = '<tr class="projects-loading-row"><td colspan="9"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span><span>Loading projects…</span></td></tr>';
     }
     if (info) info.textContent = "Loading project records…";
     if (controls) controls.replaceChildren();
@@ -287,13 +303,11 @@ function handleDashboardMetricKey(event, action) {
 function openAllProjects() {
     resetProjectFilters();
     projectLifecycle = "active";
-    updateProjectLifecycleControls();
     switchWorkspace("documents");
 }
 
 function openPendingProjects() {
     projectLifecycle = "active";
-    updateProjectLifecycleControls();
     switchWorkspace("documents");
     const statusFilter = document.getElementById("filterStatusSelect");
     if (statusFilter) statusFilter.value = "Pending";
@@ -304,7 +318,6 @@ function openPendingProjects() {
 function openDashboardAlerts() {
     resetProjectFilters();
     projectLifecycle = "alerts";
-    updateProjectLifecycleControls();
     switchWorkspace("documents");
 }
 
@@ -406,7 +419,7 @@ async function restoreAttachmentDraft(projectId) {
         pendingProjectAttachmentFiles = Array.isArray(draft.files) ? draft.files : [];
         pendingProjectAttachmentDeletes = new Set(Array.isArray(draft.deleteIds) ? draft.deleteIds : []);
         renderProjectAttachments(projectAttachmentRecords, projectId);
-        showSystemNotification("Unsaved attachment changes were restored. Select Apply Records Change to save them.");
+        showSystemNotification("Unsaved attachment changes were restored. Select Save Changes to save them.");
     } catch (error) { console.warn("Could not restore attachment draft:", error); }
 }
 
@@ -458,7 +471,7 @@ function uploadProjectAttachments() {
     input.value = "";
     saveAttachmentDraft();
     renderProjectAttachments(projectAttachmentRecords, editingId);
-    showSystemNotification("Attachment changes are pending. Select Apply Records Change to save them.");
+    showSystemNotification("Attachment changes are pending. Select Save Changes to save them.");
 }
 
 function deleteProjectAttachment(attachmentId) {
@@ -466,7 +479,7 @@ function deleteProjectAttachment(attachmentId) {
     else pendingProjectAttachmentDeletes.add(attachmentId);
     saveAttachmentDraft();
     renderProjectAttachments(projectAttachmentRecords, editingId);
-    showSystemNotification("Attachment changes are pending. Select Apply Records Change to save them.");
+    showSystemNotification("Attachment changes are pending. Select Save Changes to save them.");
 }
 
 let projectSaveInProgress = false;
@@ -475,7 +488,7 @@ function setProjectSaveState(saving, message = "", failed = false) {
     const button = document.getElementById("saveBtn");
     if (button) {
         button.disabled = saving;
-        button.textContent = saving ? "Saving…" : editingId === null ? "Save Project" : "Apply Records Change";
+        button.textContent = saving ? "Saving…" : editingId === null ? "Save Project" : "Save Changes";
         button.setAttribute("aria-busy", String(saving));
     }
     for (const id of ["cancelEditBtn", "editPaneCloseButton"]) {
@@ -503,19 +516,46 @@ function validateProjectNumbersAndActualDates(record) {
     for (const field of ['completion','swa']) {
         if (record[field] && record[field] > today) errors.push(`${field}: actual dates cannot be in the future.`);
     }
-    for (const field of ['approvedBudget','bidAmount','ldAmount']) {
+    for (const field of ['approvedBudget','bidAmount','materialTestingAmount','losingBidAmount1','losingBidAmount2']) {
         const raw = String(record[field] ?? '').trim();
-        if (!raw || raw === '-') continue;
+        const acceptsStatus = field.startsWith('losingBidAmount');
+        if (!raw || raw === '-' || (acceptsStatus && /^(?:N\/A|DQ)$/i.test(raw))) continue;
         const value = raw.replace(/[₱$,\s]/g,'');
-        if (!/^\d+(\.\d{1,2})?$/.test(value) || value.split('.')[0].replace(/^0+/,'').length > 13) errors.push(`${field}: use a non-negative amount with up to two decimal places.`);
+        if (!/^\d+(\.\d{1,2})?$/.test(value) || value.split('.')[0].replace(/^0+/,'').length > 13) {
+            const options = acceptsStatus ? ', N/A, or DQ' : '';
+            errors.push(`${field}: use a non-negative amount with up to two decimal places and 13 digits before the decimal${options}.`);
+        }
     }
-    for (const field of ['ldNoOfDays','ldActualDuration','contractDuration']) {
+    for (const field of ['ldActualDuration','contractDuration']) {
         const value = record[field];
         if (value === '' || value === null || value === undefined || (field !== 'contractDuration' && value === '-')) continue;
         const numeric = field === 'contractDuration' ? /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i : /^(?:\d+(?:\.\d*)?|\.\d+)$/;
         if (!numeric.test(String(value).trim()) || !Number.isFinite(Number(value)) || Number(value) > 36500 || (field === 'contractDuration' && Number(value) <= 0)) errors.push(`${field}: use ${field === 'contractDuration' ? 'a positive' : 'a non-negative'} number of days up to 36500. Decimals are allowed.`);
     }
+    errors.push(...validateProjectRevisionFields(record));
     return errors;
+}
+
+function setProjectFormTabs(editing) {
+    const tabs = document.getElementById("projectFormTabs");
+    tabs.classList.toggle("d-none", !editing);
+    document.getElementById("projectFormPanels").classList.toggle("tab-content", editing);
+    if (editing) {
+        bootstrap.Tab.getOrCreateInstance(document.getElementById("project-tab-basics")).show();
+        tabs.scrollLeft = 0;
+        document.getElementById("documentForm").scrollTop = 0;
+    }
+}
+
+function focusProjectFormField(id) {
+    const field = document.getElementById(id);
+    const panel = field?.closest("#projectFormPanels.tab-content > .tab-pane");
+    if (panel && !panel.classList.contains("active")) {
+        const tab = document.querySelector(`#projectFormTabs [aria-controls="${panel.id}"]`);
+        bootstrap.Tab.getOrCreateInstance(tab).show();
+        tab.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+    field?.focus();
 }
 
 function saveDocument() {
@@ -529,6 +569,7 @@ function saveDocument() {
     const title = titleEl ? titleEl.value.trim() : "";
     
     if (!title) {
+        focusProjectFormField("title");
         alert("'2. Project Title' is a required field.");
         return;
     }
@@ -550,24 +591,30 @@ function saveDocument() {
         for (const [id, label] of required) {
             const value = id === "biddingDate" ? getDateValue(id) : getValue(id);
             if (!value) {
-                document.getElementById(id)?.focus();
+                focusProjectFormField(id);
                 alert(`${label} is a required field.`);
                 return;
             }
         }
         const budget = getValue("approvedBudget").replace(/[₱$,\s]/g, "");
         if (!/^\d+(\.\d{1,2})?$/.test(budget)) {
-            document.getElementById("approvedBudget")?.focus();
+            focusProjectFormField("approvedBudget");
             alert("Approved Budget must be a non-negative amount with at most two decimal places.");
             return;
         }
     }
 
+    const sequenceError = projectInspectionSequenceError();
+    if (sequenceError) {
+        showSystemNotification(sequenceError.message);
+        document.getElementById(sequenceError.required)?.focus();
+        return;
+    }
     const completionDate = getDateValue('completionDate');
     const statusValue = automaticProjectFormStatus();
-    if (editingId === null && statusValue.toLowerCase() === "completed" && !completionDate) {
+    if (editingId === null && document.getElementById('statusMode')?.value !== 'manual' && statusValue.toLowerCase() === "completed" && !completionDate) {
         updateCompletionDateHint();
-        document.getElementById("completionDate")?.focus();
+        focusProjectFormField("completionDate");
         showSystemNotification("Add a Completion Date before saving a completed project.");
         return;
     }
@@ -575,7 +622,7 @@ function saveDocument() {
     const durationValue = getValue("contractDuration");
     if (durationValue !== "" && parseContractDuration(durationValue) === null) {
         showSystemNotification("Contract duration must be a positive number of working days (Monday–Friday), such as 30 or 30.5.");
-        document.getElementById("contractDuration")?.focus();
+        focusProjectFormField("contractDuration");
         return;
     }
     const getSourceOfFundValue = () => {
@@ -591,6 +638,7 @@ function saveDocument() {
     };
 
     const docPayload = {
+        ...Object.fromEntries((typeof additionalProjectFields === "undefined" ? [] : additionalProjectFields).map(({key}) => [key, getValue(key)])),
         sourceOfFund: getSourceOfFundValue(),                      // 6
         biddingDate: getDateValue("biddingDate"),                    // 1
         title: title,                                                // 2
@@ -629,19 +677,22 @@ function saveDocument() {
         updatedAt: new Date().toISOString()
     };
 
+    normalizeProjectRevisionPayload(docPayload);
     const inputErrors = validateProjectNumbersAndActualDates(docPayload);
-    if (inputErrors.length) { showSystemNotification(inputErrors.join(' ')); return; }
+    if (inputErrors.length) {
+        const field = inputErrors[0].split(':', 1)[0];
+        focusProjectFormField(field === "completion" ? "completionDate" : field);
+        showSystemNotification(inputErrors.join(' '));
+        return;
+    }
     if (editingId === null) {
-        // On creation: fetch existing projects to assign projectNo and detect duplicates
+        // The server assigns the permanent number when the new project is saved.
         const transaction = db.transaction(["projects"], "readonly");
         const store = transaction.objectStore("projects");
         const getAllRequest = store.getAll();
 
         getAllRequest.onsuccess = () => {
             const existingProjects = getAllRequest.result || [];
-           docPayload.projectNo =
-           String(getNextProjectNumber(existingProjects));
-
             // Detect existing project with same title (case-insensitive)
             const normalizedNewTitle = (docPayload.title || "").trim().toLowerCase();
             const match = existingProjects.find(p => p.title && p.title.trim().toLowerCase() === normalizedNewTitle);
@@ -676,7 +727,7 @@ function showProjectDuplicateModal(existingRecord, newPayload) {
         { key: 'winningBidder', label: 'Winning Bidder' },
         { key: 'status', label: 'Status' },
         { key: 'approvedBudget', label: 'Approved Budget' },
-        { key: 'bidAmount', label: 'Bid Amount' },
+        { key: 'bidAmount', label: 'Winning Bid Amount' },
         { key: 'prNumber', label: 'PR Number' },
         { key: 'noaDueDate', label: 'NOA Due Date' },
         { key: 'noa', label: 'NOA Issued Date' },
@@ -905,7 +956,7 @@ async function loadServerProjectPage(silent = false) {
         console.error("Unable to load the project page:", error);
         if (requestSequence === projectListRequestSequence && ["documents", "archive"].includes(activeWorkspace)) {
             const table = document.getElementById("documentTable");
-            if (table) table.innerHTML = '<tr class="projects-loading-row"><td colspan="8">Unable to load project records. Please try again.</td></tr>';
+            if (table) table.innerHTML = '<tr class="projects-loading-row"><td colspan="9">Unable to load project records. Please try again.</td></tr>';
         }
         if (!silent) showSystemNotification(error.message || "Unable to load project records.");
         return false;
@@ -913,7 +964,6 @@ async function loadServerProjectPage(silent = false) {
 }
 
 function loadDocuments(skipServerRefresh = false) {
-    if (window.currentUser?.role === "superadmin") return;
     if (typeof refreshGlobalNotifications === "function") refreshGlobalNotifications();
     if (!db) return;
 
@@ -1356,8 +1406,8 @@ function loadDocuments(skipServerRefresh = false) {
 }
 
 function renderTablePage() {
-    const canDelete = canDeleteProjects();
-    const canArchive = canArchiveProjects();
+    const showProjectDeletion = canDeleteProjects();
+    const canArchive = activeWorkspace !== "archive" && canArchiveProjects();
     const startIdx = (currentPage - 1) * itemsPerPage;
     const endIdx = startIdx + itemsPerPage;
 
@@ -1643,6 +1693,7 @@ const isAwardingOverdue =
 
         const projectTitle =
             escapeHtml(doc.title || "Untitled Project");
+        const referenceNo = escapeHtml(String(doc.referenceNo ?? "").trim() || "—");
 
 
         const winningBidder =
@@ -1673,6 +1724,8 @@ const isAwardingOverdue =
                     </span>
 
                 </td>
+
+                <td class="project-reference-cell">${referenceNo}</td>
 
 
                 <td>
@@ -1764,9 +1817,9 @@ const isAwardingOverdue =
                     <div class="project-row-actions">
 
 
-                        ${canArchive ? `
-                            <button type="button" onclick="setDocumentArchived(${doc.id}, ${doc.archivedAt ? "false" : "true"})" class="btn btn-sm btn-outline-secondary">
-                                ${doc.archivedAt ? "Restore" : "Archive"}
+                        ${canArchive && !doc.archivedAt ? `
+                            <button type="button" onclick="openProjectArchive(${doc.id})" class="btn btn-sm btn-outline-secondary">
+                                Archive
                             </button>
                         ` : ""}
 
@@ -1782,7 +1835,7 @@ const isAwardingOverdue =
 
 
 
-                        ${canDelete ? `
+                        ${showProjectDeletion ? `
                             <button
                                 type="button"
                                 onclick="deleteDocument(${doc.id})"
@@ -1814,7 +1867,7 @@ const isAwardingOverdue =
                 <tr>
 
                     <td
-                        colspan="8"
+                        colspan="9"
                         class="text-center py-5 text-muted"
                     >
                         No records match the current search or filters.
@@ -1832,6 +1885,7 @@ const isAwardingOverdue =
 
 
 let projectDetailsEditId = null;
+let projectDetailsHistoryProject = null;
 let projectDetailsRequestSequence = 0;
 let projectDetailsAlertsOnShow = null;
 let projectDetailsModalShown = false;
@@ -1953,327 +2007,10 @@ function viewProjectDetails(id, source = "", { openAlerts = false } = {}) {
         };
 
 
-        body.innerHTML = `
-
-            <!-- ============================================
-                 SUMMARY
-                 ============================================ -->
-            <div class="project-details-summary">
-
-                <div>
-
-                    <div class="project-details-project-number">
-                        Project Number
-                        ${value(project.projectNo)}
-                    </div>
-
-
-                    <h3 class="project-details-project-title">
-                        ${value(project.title)}
-                    </h3>
-
-
-                    <div class="project-details-contractor">
-                        ${value(project.winningBidder)}
-                    </div>
-
-                </div>
-
-
-                <span class="project-details-status ${getStatusClass(project.status)}">
-                    ${value(project.status || "Pending")}
-                </span>
-
-            </div>
-
-
-            <!-- ============================================
-                 BASIC INFORMATION
-                 ============================================ -->
-            <section class="project-detail-section">
-
-                <h4 class="project-detail-section-title">
-                    Basic Information
-                </h4>
-
-
-                <div class="project-detail-grid">
-
-                    
-
-
-                    ${field(
-                        "Approved Budget for the Contract",
-                        value(project.approvedBudget)
-                    )}
-
-
-                    
-
-
-                    
-
-
-                    ${field(
-                        "Source of Fund",
-                        value(project.sourceOfFund === "Brgy Fund" ? "Barangay Fund" : project.sourceOfFund)
-                    )}
-
-                </div>
-
-            </section>
-
-
-            <!-- ============================================
-                 PROCUREMENT & AWARD
-                 ============================================ -->
-            <section class="project-detail-section">
-
-                <h4 class="project-detail-section-title">
-                    Procurement and Award
-                </h4>
-
-
-                <div class="project-detail-grid">
-
-                    ${field(
-                        "Date of Bidding",
-                        dateValue(project.biddingDate)
-                    )}
-
-                    ${field(
-                        "Bid Amount",
-                        value(project.bidAmount)
-                    )}
-
-                    ${field(
-                        "Winning Bidder",
-                        value(project.winningBidder)
-                    )}
-
-                    ${field(
-                        "Purchase Request Number",
-                        value(project.prNumber)
-                    )}
-
-
-                    ${field(
-                        "Purchase Request Date",
-                        dateValue(project.prDate)
-                    )}
-
-
-                    ${field(
-                        "Obligation Request Date",
-                        dateValue(project.obre)
-                    )}
-
-
-                    ${field(
-                        "Resolution Number",
-                        value(project.resolutionNumber)
-                    )}
-
-
-                    ${field(
-                        "Resolution Date",
-                        dateValue(project.resolutionDate)
-                    )}
-
-
-                    ${field(
-                        "Notice of Post Qualification",
-                        dateValue(project.noticePostQual)
-                    )}
-
-
-                    ${field(
-                        "NOA Due Date", dateValue(project.noaDueDate))}
-                    ${field("NOA Issued Date",
-                        dateValue(project.noa)
-                    )}
-
-
-                    ${field(
-                        "Performance Bond",
-                        dateValue(project.performanceBond)
-                    )}
-
-                </div>
-
-            </section>
-
-
-            <!-- ============================================
-                 CONTRACT
-                 ============================================ -->
-            <section class="project-detail-section">
-
-                <h4 class="project-detail-section-title">
-                    Contract and Implementation
-                </h4>
-
-
-                <div class="project-detail-grid">
-
-                    ${field(
-                        "Contract Date",
-                        dateValue(project.contractRef)
-                    )}
-
-
-                    ${field(
-                        "Contract Duration",
-                        value(project.contractDuration)
-                    )}
-
-
-                    ${field(
-                        "Notice to Proceed",
-                        dateValue(project.ntpDate)
-                    )}
-
-
-                    ${field(
-                        "Department of Labor and Employment Clearance",
-                        dateValue(project.dole)
-                    )}
-
-
-                    ${field(
-                        "Contract End Date",
-                        dateValue(project.contractEndDate)
-                    )}
-
-                </div>
-
-            </section>
-
-
-            <!-- ============================================
-                 INSPECTION
-                 ============================================ -->
-            <section class="project-detail-section">
-
-                <h4 class="project-detail-section-title">
-                    Inspection and Completion
-                </h4>
-
-
-                <div class="project-detail-grid project-detail-due-grid">
-
-                    ${field("Pre-inspection Due Date", dateValue(getProjectMilestoneDates(project).preInspectionDueDate))}
-                    ${field("Notice to Proceed Due Date", dateValue(getProjectMilestoneDates(project).ntpDueDate))}
-                    ${field("Material Testing Due Date", dateValue(getProjectMilestoneDates(project).materialTestingDueDate))}
-                    ${field("Final Inspection Due Date", dateValue(getProjectMilestoneDates(project).finalInspectionDueDate))}
-                    ${field("SWA Due Date", dateValue(getSwaDueDateValue(project.completion)))}
-                </div>
-                <div class="project-detail-grid">
-                    ${field("Material Testing Date", dateValue(project.materialTestingDate))}
-
-                    ${field(
-                        "Pre Inspection",
-                        dateValue(project.preInspection)
-                    )}
-
-
-                    ${field(
-                        "Final Inspection",
-                        dateValue(project.finalInspection)
-                    )}
-
-
-                    ${field(
-                        "Statement of Work Accomplished Date",
-                        dateValue(project.swa)
-                    )}
-
-
-                    ${field(
-                        "Completion Date",
-                        dateValue(project.completion)
-                    )}
-
-
-                    ${field(
-                        "Operational Status",
-                        `<span class="project-status-badge ${getStatusClass(project.status)}">${value(project.status || "Pending")}</span>`
-                    )}
-
-                </div>
-
-            </section>
-
-
-            <!-- ============================================
-                 LIQUIDATED DAMAGES
-                 ============================================ -->
-            <section class="project-detail-section">
-
-                <h4 class="project-detail-section-title">
-                    Liquidated Damages
-                </h4>
-
-
-                <div class="project-detail-grid">
-
-                    ${field(
-                        "Liquidated Damages Amount",
-                        value(project.ldAmount)
-                    )}
-
-
-                    ${field(
-                        "Liquidated Damages Number of Days",
-                        value(project.ldNoOfDays)
-                    )}
-
-
-                    ${field(
-                        "Revised Completion Date After Liquidated Damages",
-                        dateValue(project.ldNewCompletionDate)
-                    )}
-
-
-                    ${field(
-                        "Actual Duration After Liquidated Damages",
-                        value(project.ldActualDuration)
-                    )}
-
-                </div>
-
-            </section>
-
-
-            <section class="project-detail-section">
-                <h4 class="project-detail-section-title">Attachments</h4>
-                ${(project.attachments || []).length
-                    ? `<div class="list-group">${project.attachments.map(file => {
-                        const url = `api/attachments.php?projectId=${encodeURIComponent(project.id)}&attachmentId=${encodeURIComponent(file.id)}`;
-                        return `<div class="list-group-item d-flex justify-content-between align-items-center gap-3"><div class="text-truncate"><a href="${url}" data-preview-name="${escapeHtml(file.name)}" data-preview-mime="${escapeHtml(file.mime || "")}" onclick="openAttachmentPreview(event)">${escapeHtml(file.name)}</a><div class="small text-muted">${formatAttachmentSize(Number(file.size) || 0)}</div></div><a class="btn btn-outline-secondary btn-sm" href="${url}&download=1">Download</a></div>`;
-                    }).join("")}</div>`
-                    : '<span class="project-detail-empty">No attachments</span>'}
-            </section>
-
-
-            <!-- ============================================
-                 REMARKS
-                 ============================================ -->
-            <section class="project-detail-section">
-
-                <h4 class="project-detail-section-title">
-                    Remarks
-                </h4>
-
-
-                <div class="project-detail-remarks">
-                    ${value(project.remarks)}
-                </div>
-
-            </section>
-
-        `;
-
+        const additionalDetails = (typeof additionalProjectFields === "undefined" ? [] : additionalProjectFields).filter(({key}) => key !== "referenceNo" && !key.startsWith("losing")).map(({key,label,type}) =>
+            field(escapeHtml(label), type === "date" ? dateValue(project[key]) : value(project[key]))
+        ).join("");
+        body.innerHTML = renderRevisedProjectDetails(project);
 
         const modalElement =
             document.getElementById(
@@ -2288,13 +2025,13 @@ function viewProjectDetails(id, source = "", { openAlerts = false } = {}) {
         const editButton = document.getElementById("projectDetailsEditButton");
         const openedFromNeedsAttention = source === "needs-attention";
         projectDetailsEditId = id;
+        projectDetailsHistoryProject = { title: project.title, projectNo: project.projectNo };
+        syncProjectDetailsDeletionRequest();
         const presence = document.getElementById("projectDetailsPresence");
         if (presence) presence.dataset.projectEditors = String(id);
         if (typeof renderProjectEditingIndicators === "function") renderProjectEditingIndicators();
         if (typeof refreshProjectEditingPresence === "function") void refreshProjectEditingPresence();
         hideProjectAlertsDropdown();
-        const alertsButton = document.getElementById("projectDetailsAlertsButton");
-        if (alertsButton) { alertsButton.setAttribute("aria-expanded", "false"); alertsButton.textContent = "Alerts"; }
         projectDetailsEditSource = openedFromNeedsAttention ? "alerts" : "projects";
         if (editButton) {
             editButton.classList.toggle(
@@ -2340,6 +2077,41 @@ function editProjectFromDetails() {
     const modal = bootstrap.Modal.getInstance(modalElement);
     modalElement.addEventListener("hidden.bs.modal", () => editDocument(projectId, source), { once: true });
     modal?.hide();
+}
+
+function showProjectActionDialog(dialog) {
+    const warning = document.getElementById("sessionIdleWarning");
+    const warningParent = warning?.parentNode;
+    const warningNext = warning?.nextSibling;
+    if (warning) dialog.appendChild(warning);
+    dialog.addEventListener("close", () => {
+        if (warning?.parentNode === dialog) warningParent.insertBefore(warning, warningNext);
+        void checkForSharedProjectUpdates();
+    }, { once: true });
+    dialog.showModal();
+}
+
+function openProjectDetailsHistory() {
+    if (!projectDetailsEditId || !projectDetailsModalShown || !window.currentUser) return;
+    hideProjectAlertsDropdown();
+    void viewHistory(projectDetailsEditId, 1, projectDetailsHistoryProject, document.getElementById("projectDetailsModal"));
+}
+
+function canRequestDeletionFromDetails() {
+    return window.currentUser?.role === "staff" && canDeleteProjects();
+}
+
+function syncProjectDetailsDeletionRequest() {
+    document.getElementById("projectDetailsDeletionRequest")?.classList.toggle("d-none", !canRequestDeletionFromDetails());
+}
+
+function requestDeletionFromDetails() {
+    const projectId = projectDetailsEditId;
+    const details = document.getElementById("projectDetailsModal");
+    const modal = bootstrap.Modal.getInstance(details);
+    if (!projectId || !modal || !canRequestDeletionFromDetails()) return;
+    details.addEventListener("hidden.bs.modal", () => deleteDocument(projectId), { once: true });
+    modal.hide();
 }
 
 function printProjectDetails() {
@@ -2423,7 +2195,9 @@ body { width: 186mm; color: #182433; background: #fff; font: 10.5pt/1.35 Arial, 
 .project-detail-section-title { margin:0 0 1.5mm; padding:1mm 0; border-bottom:1px solid #b9c5d1; color:#16324f; font-size:10pt; font-weight:700; }
 .project-detail-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:1.8mm 5mm; }
 .project-detail-due-grid { grid-template-columns:repeat(3,minmax(0,1fr)); margin-bottom:1.8mm; }
-.print-procurement .project-detail-grid, .print-liquidated .project-detail-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.print-procurement .project-detail-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+.print-liquidated .project-detail-grid { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.print-procurement .project-detail-bidders { margin-bottom:2mm; }
 .project-detail-field { min-width:0; break-inside:avoid; overflow-wrap:anywhere; }
 .project-detail-label { margin-bottom:.8mm; color:#526174; font-size:8.2pt; line-height:1.25; font-weight:400; }
 .project-detail-value { white-space:normal; font-size:10pt; line-height:1.3; font-weight:600; }
@@ -2512,6 +2286,7 @@ function changePage(page) {
 }
 
 const inputFieldsList = [
+    ...(typeof additionalProjectFields === "undefined" ? [] : additionalProjectFields).map(({key}) => key),
     "biddingDate", "title", "approvedBudget", "bidAmount", "winningBidder", 
     "sourceOfFund", "sourceOfFundCustom", "prNumber", "prDate", "obre", "resolutionNumber", 
     "resolutionDate", "noticePostQual", "noaDueDate", "noa", "performanceBond", "contractRef", 
@@ -2573,11 +2348,11 @@ function resumeSuspendedProjectDraft() {
 
 function automaticProjectFormStatus() {
     const value=id=>document.getElementById(id)?.value||'';
-    const current=value('status').toLowerCase();
+    if (value('statusMode') === 'manual') return value('status');
     const today = timelineCalendarDay(new Date());
     const swa = projectCalendarDate(value('swa')), completion = projectCalendarDate(value('completionDate'));
-    if((swa && value('swa') <= today)||(!swa && current==='released')) return 'Released';
-    if((completion && value('completionDate') <= today)||(!completion && current==='completed')) return 'Completed';
+    if((swa && value('swa') <= today)) return 'Released';
+    if((completion && value('completionDate') <= today)) return 'Completed';
     if(projectCalendarDate(value('finalInspection'))) return 'Pending';
     const project={biddingDate:value('biddingDate'),contractRef:value('contractRef'),contractDuration:value('contractDuration'),contractEndDate:value('contractEndDate')};
     const end=getProjectMilestoneDates(project).contractDueDate;
@@ -2620,12 +2395,53 @@ function updateSwaDueDate() {
     if (swaDueDate) swaDueDate.value = getSwaDueDateValue(completionDate);
 }
 
+function projectInspectionSequenceError() {
+    const previous = projectEditSnapshot || {};
+    for (const [id, key, required, message] of [
+        ['finalInspection', 'finalInspection', 'preInspection', 'Record Pre-Inspection before entering Final Inspection.'],
+        ['completionDate', 'completion', 'finalInspection', 'Record Final Inspection before entering Completion Date.']
+    ]) {
+        const value = document.getElementById(id)?.value || '';
+        const prerequisite = document.getElementById(required)?.value || '';
+        if (!projectCalendarDate(value) || projectCalendarDate(prerequisite)) continue;
+        if (value === (previous[key] || '') && prerequisite === (previous[required] || '')) continue;
+        return { required, message };
+    }
+    return null;
+}
+
+function updateInspectionEntryRequirements() {
+    for (const [id, required, helpId, message] of [
+        ['finalInspection', 'preInspection', 'finalInspectionHelp', 'Record Pre-Inspection before entering Final Inspection.'],
+        ['completionDate', 'finalInspection', 'completionDateHelp', 'Record Final Inspection before entering Completion Date.']
+    ]) {
+        const input = document.getElementById(id);
+        if (!input) continue;
+        input.disabled = !projectCalendarDate(document.getElementById(required)?.value || '');
+        input.title = input.disabled ? message : '';
+        const picker = input.closest('.project-workday-input')?.querySelector('button');
+        if (picker) picker.disabled = input.disabled;
+        const help = document.getElementById(helpId);
+        if (help) {
+            help.dataset.enabledHelp ??= help.textContent;
+            help.textContent = input.disabled ? message : help.dataset.enabledHelp;
+        }
+    }
+}
+
 function updateProjectMilestoneDates() {
     const project = Object.fromEntries(["noaDueDate", "biddingDate", "preInspection", "materialTestingDate", "finalInspection", "swa", "ntpDate", "contractRef", "contractDuration", "contractEndDate", "ldNewCompletionDate"].map(id => [id, document.getElementById(id)?.value || ""]));
     const dates = getProjectMilestoneDates(project);
     const contractEnd = document.getElementById("contractEndDate");
     const computed = Boolean(projectCalendarDate(project.contractRef) && parseContractDuration(project.contractDuration) !== null);
-    if (contractEnd) { contractEnd.readOnly = computed; if (computed) contractEnd.value = dates.contractDueDate; }
+    if (contractEnd) {
+        contractEnd.readOnly = true;
+        if (computed) contractEnd.value = dates.contractDueDate;
+        const picker = contractEnd.closest('.project-workday-input')?.querySelector('button');
+        if (picker) picker.disabled = true;
+    }
+    updateInspectionEntryRequirements();
+    syncProjectRevisionForm();
     Object.entries(dates).forEach(([id, value]) => {
         const input = document.getElementById(id);
         if (input) input.value = value;
@@ -2633,6 +2449,7 @@ function updateProjectMilestoneDates() {
 }
 
 function initializeLiveValueTracking() {
+    syncProjectRevisionForm();
 
     inputFieldsList.forEach(id => {
 
@@ -2840,6 +2657,8 @@ function editDocument(id, source = "projects", options = {}) {
                     : value;
         };
 
+
+        (typeof additionalProjectFields === "undefined" ? [] : additionalProjectFields).forEach(({key}) => setVal(key, doc[key]));
 
         setVal(
             "biddingDate",
@@ -3104,7 +2923,7 @@ function editDocument(id, source = "projects", options = {}) {
 
         if (saveBtn) {
             saveBtn.textContent =
-                "Apply Records Change";
+                "Save Changes";
         }
 
 
@@ -3121,7 +2940,9 @@ function editDocument(id, source = "projects", options = {}) {
         }
 
 
+        loadProjectRevisionRecord(doc);
         document.body.classList.add("project-edit-pane-open");
+        setProjectFormTabs(true);
         document.getElementById("editPaneCloseButton")?.classList.remove("d-none");
         document.getElementById("projectEditorAlertsButton")?.classList.remove("d-none");
         if (options.suspendedDraft) applySuspendedProjectDraft(options.suspendedDraft);
@@ -3189,6 +3010,7 @@ function resetFormAccess(options = {}) {
     projectEditReturnWorkspace = null;
     projectEditSource = "projects";
     document.body.classList.remove("project-edit-pane-open");
+    setProjectFormTabs(false);
     document.getElementById("editPaneCloseButton")?.classList.add("d-none");
     document.getElementById("projectEditorAlertsButton")?.classList.add("d-none");
     projectAttachmentRecords = [];
@@ -3257,6 +3079,7 @@ function resetFormAccess(options = {}) {
     });
 
 
+    loadProjectRevisionRecord({});
     const sourceCustomRow =
         document.getElementById(
             "sourceOfFundCustomRow"
@@ -3342,20 +3165,96 @@ function deleteDocument(id) {
     openDeletionRequest({ targetType: "project", id });
 }
 
-async function setDocumentArchived(id, archived) {
+let pendingProjectArchive = null;
+
+function openProjectArchive(id) {
     if (!canArchiveProjects()) {
         showSystemNotification("You do not have permission to archive projects.");
         return;
     }
-    const action = archived ? "archive" : "restore";
-    if (!confirm(`Are you sure you want to ${action} this project?`)) return;
+    const dialog = document.getElementById("projectArchiveDialog");
+    if (dialog.open) return;
+    const project = currentProjectsList.find(record => Number(record.id) === id);
+    if (!project || project.archivedAt) {
+        showSystemNotification("This project is no longer available to archive.");
+        return;
+    }
+
+    pendingProjectArchive = { projectId: id, userId: window.currentUser.id, confirming: false, saving: false };
+    document.getElementById("projectArchiveNumber").textContent = `Project no. ${project.projectNo || id}`;
+    document.getElementById("projectArchiveName").textContent = project.title || "Untitled project";
+    showProjectArchiveStep(false);
+    const request = pendingProjectArchive;
+    dialog.addEventListener("close", () => {
+        if (pendingProjectArchive === request) pendingProjectArchive = null;
+    }, { once: true });
+    showProjectActionDialog(dialog);
+}
+
+function showProjectArchiveStep(confirming) {
+    if (!pendingProjectArchive || pendingProjectArchive.saving) return;
+    pendingProjectArchive.confirming = confirming;
+    document.getElementById("projectArchiveTitle").textContent = confirming ? "Confirm archive" : "Review archive";
+    document.getElementById("projectArchiveDescription").textContent = confirming
+        ? "This project will move to Historical Archive."
+        : "This moves the project to Historical Archive. You can’t restore it from Project Tracker.";
+    document.getElementById("projectArchiveAcknowledgement").hidden = !confirming;
+    const checkbox = document.getElementById("projectArchiveAcknowledged");
+    checkbox.checked = false;
+    document.getElementById("projectArchiveContinue").hidden = confirming;
+    document.getElementById("projectArchiveBack").hidden = !confirming;
+    document.getElementById("projectArchiveSubmit").hidden = !confirming;
+    document.getElementById("projectArchiveError").hidden = true;
+    updateProjectArchiveSubmit();
+    (confirming ? checkbox : document.getElementById("projectArchiveContinue")).focus();
+}
+
+function updateProjectArchiveSubmit() {
+    document.getElementById("projectArchiveSubmit").disabled = !pendingProjectArchive?.confirming
+        || pendingProjectArchive.saving || !document.getElementById("projectArchiveAcknowledged").checked;
+}
+
+function setProjectArchiveSaving(request, saving) {
+    request.saving = saving;
+    for (const id of ["projectArchiveCancel", "projectArchiveBack", "projectArchiveAcknowledged"]) {
+        document.getElementById(id).disabled = saving;
+    }
+    document.getElementById("projectArchiveSubmit").textContent = saving ? "Archiving…" : "Archive project";
+    updateProjectArchiveSubmit();
+}
+
+async function confirmProjectArchive(event) {
+    event.preventDefault();
+    const dialog = document.getElementById("projectArchiveDialog");
+    const request = pendingProjectArchive;
+    if (!dialog.open || !request?.confirming || request.saving || !document.getElementById("projectArchiveAcknowledged").checked) return;
+    const error = document.getElementById("projectArchiveError");
+    if (window.currentUser?.id !== request.userId || !canArchiveProjects()) {
+        error.textContent = "You do not have permission to archive this project.";
+        error.hidden = false;
+        return;
+    }
+    error.hidden = true;
+    setProjectArchiveSaving(request, true);
     try {
-        await apiClient.post("setProjectArchived", { id, archived });
-        await db.refresh();
+        await apiClient.post("setProjectArchived", { id: request.projectId, archived: true });
+    } catch (failure) {
+        if (pendingProjectArchive === request && dialog.open) {
+            setProjectArchiveSaving(request, false);
+            error.textContent = failure.message || "Unable to archive the project.";
+            error.hidden = false;
+        }
+        return;
+    }
+    if (pendingProjectArchive !== request || !dialog.open) return;
+    setProjectArchiveSaving(request, false);
+    dialog.close();
+    const database = db;
+    try { await database?.refresh(); }
+    catch (failure) { console.warn("Unable to refresh the project cache after archiving:", failure); }
+    if (db === database && window.currentUser?.id === request.userId) {
         loadDocuments(true);
-        showSystemNotification(`Project successfully ${archived ? "archived" : "restored"}.`);
-    } catch (error) {
-        showSystemNotification(error.message || `Unable to ${action} the project.`);
+        showSystemNotification("Project archived.");
     }
 }
 
@@ -3384,6 +3283,13 @@ function clearProjectFilters() {
 document.addEventListener("DOMContentLoaded", () => {
     updateProjectNumberSortControl();
     const titleArea = document.getElementById("title");
+    document.getElementById("projectFormTabs").addEventListener("shown.bs.tab", event => {
+        document.getElementById("documentForm").scrollTop = 0;
+        if (event.target.id === "project-tab-basics" && titleArea) autoExpandTextarea(titleArea);
+    });
+    document.getElementById("documentForm").addEventListener("invalid", event => {
+        if (event.currentTarget.querySelector(":invalid") === event.target) focusProjectFormField(event.target.id);
+    }, true);
     if (titleArea) {
         titleArea.addEventListener("input", function() {
             autoExpandTextarea(this);
@@ -3526,6 +3432,8 @@ document.addEventListener("shown.bs.modal", event => {
 });
 document.addEventListener("hide.bs.modal", event => {
     if (event.target.id !== "projectDetailsModal") return;
+    const history = document.getElementById("historyModal");
+    if (history?.open && event.target.contains(history)) history.close();
     projectDetailsModalShown = false;
     projectDetailsAlertsOnShow = null;
     ++projectDetailsRequestSequence;

@@ -6,7 +6,7 @@ async function holidayRequest(payload) {
 }
 
 async function loadHolidayCalendar() {
-    if (window.currentUser?.role !== "superadmin") return;
+    if (window.currentUser?.role !== "admin") return;
     const message = document.getElementById('holidaySyncMessage');
     try { holidaySyncData = await holidayRequest(); renderHolidayCalendar(); }
     catch (error) { if (message) message.textContent = error.message; }
@@ -16,7 +16,7 @@ function renderHolidayCalendar() {
     if (!holidaySyncData) return;
     const {state,calendar} = holidaySyncData;
     window.projectHolidayCalendar = calendar;
-    const canManage = window.currentUser?.role === 'superadmin';
+    const canManage = window.currentUser?.role === 'admin';
     document.getElementById('holidaySyncControls').hidden = !canManage;
     document.getElementById('holidayOverrideForm').hidden = !canManage;
     document.getElementById('holidaySyncControls').classList.toggle('d-none',!canManage);
@@ -25,7 +25,9 @@ function renderHolidayCalendar() {
     document.getElementById('holidayExcludeHolidays').checked = calendar.excludeHolidays !== false;
     document.querySelectorAll('[data-non-working-day]').forEach(input=>input.checked=(calendar.nonWorkingDays || [0,6]).includes(Number(input.value)));
     const displayTime = value => value ? new Date(value).toLocaleString('en-PH', {timeZone:'Asia/Manila'}) : 'Never';
-    document.getElementById('holidaySyncStatus').textContent = `${state.enabled ? 'Automatic updates enabled' : 'Automatic updates disabled'} · Last successful sync: ${displayTime(state.lastSuccess)} · Last attempt: ${displayTime(state.lastAttempt)}`;
+    const source = state.lastSource ? ` · Source: ${state.lastSource}` : '';
+    const coverage = state.sourceThrough ? ` · Archive checked through ${state.sourceThrough}` : '';
+    document.getElementById('holidaySyncStatus').textContent = `${state.enabled ? 'Automatic updates enabled' : 'Automatic updates disabled'} · Last successful sync: ${displayTime(state.lastSuccess)} · Last attempt: ${displayTime(state.lastAttempt)}${source}${coverage}`;
     document.getElementById('holidaySyncMessage').textContent = state.error || '';
     const yearSelect = document.getElementById('holidayCalendarYear');
     const selected = yearSelect.value || String(new Date().getFullYear());
@@ -53,18 +55,18 @@ function renderHolidayCalendar() {
     });
     document.getElementById('holidayCalendarRows').replaceChildren(...rows);
     const pending=(calendar.pending?.[year] || []).join(', ');
-    document.getElementById('holidayCalendarCoverage').textContent = `Loaded years: ${years.join(', ')}.${pending ? ` Awaiting proclamation: ${pending}.` : ''} Local holidays can be added by Superadmin. Dates outside loaded years need a calendar update.`;
+    document.getElementById('holidayCalendarCoverage').textContent = `Loaded years: ${years.join(', ')}.${pending ? ` Awaiting proclamation: ${pending}.` : ''} Local holidays can be added by Admin. Dates outside loaded years need a calendar update.`;
     const review=document.getElementById('holidaySyncReview'); review.replaceChildren();
     for (const item of state.review || []) {
         const li=document.createElement('li'); const link=document.createElement('a');
-        if (!/^https:\/\/pco\.gov\.ph\/news_releases\/[a-z0-9-]+\/$/.test(item.url)) continue;
+        if (!/^https:\/\/(?:pco\.gov\.ph\/news_releases\/[a-z0-9-]+\/|lawphil\.net\/executive\/proc\/proc(20\d{2})\/proc_\d+_\1\.html)$/.test(item.url)) continue;
         link.href=item.url; link.target='_blank'; link.rel='noopener'; link.textContent=item.title; li.append(link); review.append(li);
     }
     document.getElementById('holidaySyncReviewPanel').hidden = !(state.review || []).length;
 }
 
 async function saveHolidayChange(action, fields = {}) {
-    if (holidaySyncBusy || window.currentUser?.role !== 'superadmin' || !holidaySyncData) return;
+    if (holidaySyncBusy || window.currentUser?.role !== 'admin' || !holidaySyncData) return;
     holidaySyncBusy=true;
     const controls=document.querySelectorAll('#holidaySyncControls button, #holidaySyncControls input, #holidayOverrideForm button, #holidayOverrideForm input, #holidayOverrideForm select');
     controls.forEach(control=>control.disabled=true);
@@ -73,7 +75,7 @@ async function saveHolidayChange(action, fields = {}) {
     try {
         holidaySyncData=await holidayRequest({action,revision:holidaySyncData.state.revision,...fields});
         renderHolidayCalendar();
-        message.textContent=action === 'sync' ? 'Official announcements checked. The calendar is up to date for supported declarations.' : 'Holiday settings saved.';
+        message.textContent=action === 'sync' ? 'Holiday announcements checked.' : 'Holiday settings saved.';
         if (typeof db?.refresh === 'function') await db.refresh();
     } catch (error) { await loadHolidayCalendar(); message.textContent=error.message; }
     finally { holidaySyncBusy=false; controls.forEach(control=>control.disabled=false); }

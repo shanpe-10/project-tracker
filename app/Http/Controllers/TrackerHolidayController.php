@@ -12,13 +12,11 @@ final class TrackerHolidayController extends Controller
     public function handle(Request $request): JsonResponse
     {
         $role = $request->session()->get('tracker_user.role');
-        if ($role !== 'superadmin') return response()->json(['ok'=>false,'message'=>'Only Superadmin can view the holiday settings.'],403);
+        if ($role !== 'admin') return response()->json(['ok'=>false,'message'=>'Only Admin can manage the working-day calendar.'],403);
         if ($request->isMethod('get')) return response()->json(TrackerHolidays::status());
-        if ($role !== 'superadmin') return response()->json(['ok'=>false,'message'=>'Only Superadmin can change or sync holidays.'],403);
         $input = $request->validate(['action'=>['required','in:settings,sync,override,restore'], 'revision'=>['required','integer','min:0'], 'enabled'=>['sometimes','required','boolean'], 'nonWorkingDays'=>['sometimes','array','max:6'], 'nonWorkingDays.*'=>['integer','between:0,6','distinct'], 'excludeHolidays'=>['sometimes','required','boolean'], 'date'=>['sometimes','required','date_format:Y-m-d'], 'name'=>['sometimes','required','string','max:160'], 'nonWorking'=>['sometimes','required','boolean']]);
         try {
             if ($input['action'] === 'sync') {
-                if (TrackerHolidays::state()['revision'] !== (int)$input['revision']) throw new \DomainException('The calendar changed. Refresh it before syncing.');
                 return response()->json(TrackerHolidays::sync(true));
             }
             if ($input['action'] === 'settings' && ! array_key_exists('enabled',$input)) return response()->json(['ok'=>false,'message'=>'Choose whether automatic sync is enabled.'],422);
@@ -38,6 +36,6 @@ final class TrackerHolidayController extends Controller
             });
             return response()->json(TrackerHolidays::status());
         } catch (\DomainException $error) { return response()->json(['ok'=>false,'message'=>$error->getMessage()],409); }
-        catch (\RuntimeException $error) { return response()->json(['ok'=>false,'message'=>'Holiday update failed. The last saved calendar is still active.'],503); }
+        catch (\RuntimeException $error) { return response()->json(['ok'=>false,'message'=>TrackerHolidays::state()['error'] ?? 'Holiday update failed. The last saved calendar is still active.'],503); }
     }
 }

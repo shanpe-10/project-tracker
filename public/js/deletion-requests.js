@@ -13,6 +13,7 @@
     function message(id, value = '') { el(id).textContent = value; el(id).hidden = !value; }
     function error(error) { message('deletionRequestError', error.message || 'Unable to process this request.'); }
     function view(name, title = 'Deletion requests') {
+        el('deletionRequestAdminPassword').value = '';
         for (const key of ['List', 'Create', 'Direct', 'Detail', 'Confirm']) el(`deletionRequest${key}View`).hidden = key !== name;
         el('deletionRequestsTitle').textContent = title;
         message('deletionRequestError');
@@ -57,7 +58,7 @@
     };
     window.startDeletionRequestUpdates = () => {
         const refresh = async () => {
-            if (!window.currentUser || window.currentUser.role === 'superadmin' || document.hidden) return;
+            if (!window.currentUser || document.hidden) return;
             await refreshCounts();
         };
         void refresh(); clearInterval(state.timer); state.timer = setInterval(refresh, 30000);
@@ -69,7 +70,6 @@
             button.setAttribute('aria-pressed', String(state.listView === name));
         }
         el('deletionRequestFilterControl').hidden = state.listView !== 'history';
-        el('deletionRequestClearHistory').hidden = state.listView !== 'history';
         el('deletionRequestFilter').querySelector('[value="approved"]').hidden = state.scope === 'review';
         el('deletionRequestListDescription').textContent = state.listView === 'history'
             ? 'Reviewed and closed requests, kept for your reference.'
@@ -77,7 +77,7 @@
             : 'Your requests awaiting review. Approved and closed requests move to History.';
     }
     window.openDeletionRequests = async (scope = workspaceScope(), listView = 'active') => {
-        if (state.busy || !window.currentUser || window.currentUser.role === 'superadmin' || (scope === 'review' && !isAdmin())) return;
+        if (state.busy || !window.currentUser || (scope === 'review' && !isAdmin())) return;
         state.scope = scope; state.listView = listView; state.target = null; state.detail = null; state.token = null; state.listFingerprint = null;
         el('deletionRequestFilter').value = '';
         view('List', scope === 'review' ? 'Deletion approvals' : 'My deletion requests'); updateListTabs(); modal();
@@ -117,25 +117,12 @@
         } catch (failure) { if (read === state.read && !silent) { el('deletionRequestList').replaceChildren(); error(failure); } }
     };
     window.changeDeletionRequestPage = direction => window.loadDeletionRequests(Math.max(1, Math.min(state.lastPage, state.page + direction)));
-    window.clearDeletionRequestHistory = async () => {
-        if (state.busy || state.listView !== 'history') return;
-        if (!window.confirm('Clear all deletion request history from your view, including every outcome and page? Active requests and other users’ history will stay available.')) return;
-        state.read++;
-        busy(true);
-        try {
-            const result = await api({ action: 'clearHistory', scope: state.scope, confirmed: true });
-            busy(false);
-            state.listFingerprint = null;
-            await window.loadDeletionRequests(1);
-            message('deletionRequestNotice', result.message);
-        } catch (failure) { error(failure); } finally { busy(false); }
-    };
     function lookupQuery(target) {
         return { scope: workspaceScope(), lookup: '1', targetType: target.targetType, all: target.all ? '1' : '0', ...(target.all ? {} : { targetId: target.id }) };
     }
     window.openDeletionRequest = async target => {
         if (state.busy || !window.currentUser) return;
-        if (!window.currentUser[target.all ? 'canDeleteAll' : 'canDelete']) { showSystemNotification('You do not have permission to request this deletion.'); return; }
+        if ((target.all && !isAdmin()) || !window.currentUser[target.all ? 'canDeleteAll' : 'canDelete']) { showSystemNotification('You do not have permission to request this deletion.'); return; }
         state.scope = workspaceScope(); state.listView = 'active'; state.target = { ...target }; state.detail = null; state.token = null; state.read++;
         view(isAdmin() ? 'Direct' : 'Create', isAdmin() ? 'Review deletion' : 'Request deletion');
         if (isAdmin()) {
@@ -148,17 +135,24 @@
             : `Request deletion of ${target.targetType === 'project' ? 'project' : 'history record'} #${target.id}${target.targetType === 'project' ? ', with its history and attachments' : ''}.`;
         el('deletionRequestReason').value = ''; modal(); busy(true);
         try {
-            const result = await api(null, lookupQuery(target));
-            if (result.request) {
-                state.target = null; renderDetail(result.request);
-                message('deletionRequestNotice', isAdmin() ? 'Review this pending request and continue to final confirmation.' : 'Your pending deletion request is shown below. You can edit its reason or cancel it.');
-            } else if (result.blocked) {
-                view('Create', isAdmin() ? 'Review pending requests' : 'Request deletion');
-                el('deletionRequestBlockedMessage').textContent = isAdmin()
-                    ? 'Some selected records have pending deletion requests. Review them in Workspace → Deletion requests.'
-                    : 'A pending request already covers these records. You can only view and change your own requests. An Admin can review it from Workspace → Deletion requests.';
-                el('deletionRequestBlocked').hidden = false;
-            } else if (isAdmin()) {
+            const directBulkProjects = isAdmin() && target.targetType === 'project' && target.all;
+            if (!directBulkProjects) {
+                const result = await api(null, lookupQuery(target));
+                if (result.request) {
+                    state.target = null; renderDetail(result.request);
+                    message('deletionRequestNotice', isAdmin() ? 'Review this pending request and continue to final confirmation.' : 'Your pending deletion request is shown below. You can edit its reason or cancel it.');
+                    return;
+                }
+                if (result.blocked) {
+                    view('Create', isAdmin() ? 'Review pending requests' : 'Request deletion');
+                    el('deletionRequestBlockedMessage').textContent = isAdmin()
+                        ? 'Some selected records have pending deletion requests. Review them in Administration → Deletion Requests.'
+                        : 'A pending request already covers these records. You can only view and change your own requests. An administrator can review it from Administration → Deletion Requests.';
+                    el('deletionRequestBlocked').hidden = false;
+                    return;
+                }
+            }
+            if (isAdmin()) {
                 const preview = await api({ action: 'previewDirect', ...state.target });
                 el('deletionDirectReason').value = ''; renderDirect(preview.selection);
             } else el('deletionRequestCreateForm').hidden = false;
@@ -190,6 +184,9 @@
         el('deletionDirectScope').textContent = item.targetType === 'project'
             ? 'The selected projects, their history and attachments will be permanently removed after final confirmation.'
             : 'The selected history records will be permanently removed after final confirmation. The projects will be kept.';
+        if (item.targetType === 'project' && item.bulk) {
+            el('deletionDirectScope').textContent += ' This includes all current active and archived projects, across every page and filter. Open deletion requests for the selected projects will close when you confirm.';
+        }
         el('deletionDirectTargets').innerHTML = item.targets.map(target => `<li><strong>${escape(target.record.title || target.record.action || 'History record')}</strong> · #${target.id}${target.record.projectNo ? ` · Project ${escape(target.record.projectNo)}` : ''}</li>`).join('')
             + (item.targetCount > item.targets.length ? `<li>And ${item.targetCount - item.targets.length} more records.</li>` : '');
     }
@@ -216,7 +213,7 @@
             ${item.reviewer ? `<p class="request-event">${item.stage === 'rejected' ? 'Rejected' : 'Reviewed'} by ${escape(person(item.reviewer))} · ${escape(date(item.reviewedAt))}</p>` : ''}
             ${item.decisionNote ? `<div class="request-reason-panel"><h3>Decision note</h3><p>${escape(item.decisionNote)}</p></div>` : ''}
             ${item.reasonUpdatedAt ? `<p class="request-event">Reason updated · ${escape(date(item.reasonUpdatedAt))}</p>` : ''}
-            ${item.cancelledAt ? `<p class="request-event">Cancelled · ${escape(date(item.cancelledAt))}. Records were kept.</p>` : ''}
+            ${item.cancelledAt ? `<p class="request-event">Cancelled · ${escape(date(item.cancelledAt))}</p>` : ''}
             ${item.deletedBy ? `<p class="request-event">Deletion confirmed by ${escape(person(item.deletedBy))} · ${escape(date(item.deletedAt))}</p>` : ''}
             <details class="request-targets"><summary>Included records (${item.targetCount})</summary><ul>${item.targets.map(target => `<li><strong>${escape(target.record.title || target.record.action || 'History record')}</strong> · #${target.id}${target.record.projectNo ? `<br>Project ${escape(target.record.projectNo)}` : ''}</li>`).join('')}</ul></details>`;
         el('deletionRequestOwnerControls').hidden = !item.isOwner || item.status !== 'pending';
@@ -274,6 +271,7 @@
             ? 'I have reviewed the selected records and confirm permanent deletion.'
             : 'I have reviewed the request and confirm permanent deletion.';
         el('deletionRequestConfirmed').checked = false;
+        el('deletionRequestAdminPassword').value = '';
     }
     window.reviewDeletionRequest = async decision => {
         if (state.busy || !isAdmin() || !state.detail) return;
@@ -297,6 +295,7 @@
     };
     window.cancelDeletionConfirmation = async () => {
         if (state.busy || !state.detail) return;
+        el('deletionRequestAdminPassword').value = '';
         if (state.detail.direct) {
             busy(true); await discardDirectConfirmation(); renderDirect(state.detail); busy(false);
             message('deletionRequestNotice', 'No records were deleted. Review the records before continuing.'); return;
@@ -307,10 +306,12 @@
     window.confirmDeletionRequest = async event => {
         event.preventDefault();
         if (state.busy || !isAdmin() || !state.detail || !state.token || !el('deletionRequestConfirmed').checked) return;
+        const password = el('deletionRequestAdminPassword');
+        if (!password.value) { error(new Error('Enter your Admin password to confirm deletion.')); password.focus(); return; }
         busy(true);
         try {
             const direct = state.detail.direct;
-            await api({ action: direct ? 'confirmDirect' : 'confirm', ...(direct ? {} : { id: state.detail.id }), confirmationToken: state.token, confirmed: true });
+            await api({ action: direct ? 'confirmDirect' : 'confirm', ...(direct ? {} : { id: state.detail.id }), confirmationToken: state.token, confirmed: true, current_password: password.value });
             state.token = null;
             if (direct) {
                 busy(false); bootstrap.Modal.getOrCreateInstance(el('deletionRequestsModal')).hide();
@@ -320,7 +321,7 @@
             if (window.db) await window.db.refresh();
             if (typeof loadDocuments === 'function') loadDocuments(true);
             if (typeof loadAuditLog === 'function') loadAuditLog();
-        } catch (failure) { error(failure); } finally { busy(false); }
+        } catch (failure) { error(failure); } finally { password.value = ''; busy(false); }
     };
     document.addEventListener('DOMContentLoaded', () => {
         el('deletionRequestsModal').addEventListener('shown.bs.modal', () => {
@@ -329,6 +330,6 @@
                 if (!document.hidden && !state.busy && !el('deletionRequestListView').hidden) void window.loadDeletionRequests(state.page, true);
             }, 5000);
         });
-        el('deletionRequestsModal').addEventListener('hidden.bs.modal', () => { void discardDirectConfirmation(); state.token = null; state.read++; clearInterval(state.poll); });
+        el('deletionRequestsModal').addEventListener('hidden.bs.modal', () => { el('deletionRequestAdminPassword').value = ''; void discardDirectConfirmation(); state.token = null; state.read++; clearInterval(state.poll); });
     });
 })();

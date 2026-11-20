@@ -55,6 +55,7 @@ class DeletionRequestControlsTest extends TestCase
             $t->boolean('active')->default(true);
             foreach (['can_create','can_edit','can_import','can_export','can_delete','can_delete_all','can_resolve_alerts','can_archive'] as $name) $t->boolean($name)->default(false);
         });
+        Schema::create('login_attempts', function (Blueprint $t) { $t->string('attempt_key')->primary(); $t->integer('failed_count')->default(0); $t->timestamp('first_failed_at'); $t->timestamp('locked_until')->nullable(); $t->timestamp('updated_at'); });
         Schema::create('tracker_account_sessions', function (Blueprint $t) { $t->unsignedBigInteger('user_id')->primary(); $t->string('token_hash'); $t->bigInteger('started_at'); $t->bigInteger('last_activity_at'); });
         Schema::create('projects', function (Blueprint $t) {
             $t->id(); $t->json('data');
@@ -117,7 +118,7 @@ class DeletionRequestControlsTest extends TestCase
 
     private function confirm(int $id, string $token)
     {
-        return $this->api(['action' => 'confirm', 'id' => $id, 'confirmationToken' => $token, 'confirmed' => true]);
+        return $this->api(['action' => 'confirm', 'id' => $id, 'confirmationToken' => $token, 'confirmed' => true, 'current_password' => 'fixture-password']);
     }
 
     public function test_trash_lookup_reopens_own_request_without_disclosing_someone_elses_request(): void
@@ -212,7 +213,9 @@ class DeletionRequestControlsTest extends TestCase
     public function test_project_lookup_opens_an_owned_bulk_request_and_cancel_releases_all_projects(): void
     {
         $other=$this->project('Second bulk target');
-        $id=$this->requestDeletion(['all'=>true]);
+        // Keep coverage for an owned bulk request created before Staff Delete All was removed.
+        $this->asUser(2);$id=$this->requestDeletion(['all'=>true]);
+        DB::table('deletion_requests')->where('id',$id)->update(['requested_by'=>1]);$this->asUser(1);
         foreach([$this->projectId,$other]as$target)$this->authenticated()->getJson('/api/deletion-requests.php?lookup=1&targetType=project&all=0&targetId='.$target)->assertJsonPath('request.id',$id)->assertJsonPath('request.targetCount',2);
         $this->authenticated()->getJson('/api/deletion-requests.php?lookup=1&targetType=project&all=1')->assertJsonPath('request.id',$id);
         $this->api(['action'=>'cancel','id'=>$id])->assertOk();$this->assertDatabaseCount('projects',2);

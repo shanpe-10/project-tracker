@@ -30,7 +30,7 @@ class CoreDefectRegressionTest extends TestCase
     }
     private function install(): void {
         DB::unprepared(file_get_contents(database_path('lgu_project_tracker_schema.sql')));
-        foreach ([1=>'staff',2=>'superadmin'] as $id=>$role) {
+        foreach ([1=>'staff',2=>'admin'] as $id=>$role) {
             DB::table('users')->insert(['id'=>$id,'username'=>'fixture'.$id,'full_name'=>'Fixture '.$id,'role'=>$role,'active'=>true,'can_create'=>true,'can_edit'=>true,'can_import'=>true,'can_export'=>true,'can_delete'=>true,'password_hash'=>Hash::make('fixture-password-2026')]);
             DB::table('tracker_account_sessions')->insert(['user_id'=>$id,'token_hash'=>hash('sha256','fixture-session-'.$id),'started_at'=>time(),'last_activity_at'=>time()]);
         }
@@ -71,6 +71,31 @@ class CoreDefectRegressionTest extends TestCase
         $this->assertDatabaseCount('users',2); $this->assertDatabaseCount('projects',1); $this->assertDatabaseCount('history',1);
         $this->assertDatabaseHas('projects',['id'=>$id,'title'=>'Fixture project']);
         $this->assertTrue(\Illuminate\Support\Facades\Schema::hasTable('import_staging_chunks'));
+    }
+    public function test_title_upgrade_preserves_existing_titles_and_imports_the_full_long_title(): void {
+        $this->install();
+        DB::statement('ALTER TABLE projects ALTER COLUMN title TYPE varchar(255)');
+        $id = $this->project(['projectNo' => '1', 'title' => 'Existing project title']);
+        $migration = require database_path('migrations/2026_11_11_000002_allow_longer_project_titles.php');
+        $migration->up();
+
+        $title = str_repeat('x', 256);
+        $batch = 'import_full_project_title';
+        $this->stage($batch, [['title' => $title, 'projectNo' => '2']])->assertOk();
+        $this->commit($batch)->assertOk()->assertJsonPath('count', 1);
+        $this->assertDatabaseHas('projects', ['id' => $id, 'title' => 'Existing project title']);
+        $imported = DB::table('projects')->where('project_no', '2')->first();
+        $this->assertSame($title, $imported->title);
+        $this->assertSame($title, json_decode($imported->data, true)['title']);
+
+        $this->expectException(\RuntimeException::class);
+        $migration->down();
+    }
+    public function test_registry_search_matches_accented_titles_case_insensitively(): void {
+        $this->install();
+        $id = $this->project(['projectNo' => '50', 'title' => 'Audit CAÑAS building']);
+        $this->getApi('action=listProjects&search='.rawurlencode('cañas'))
+            ->assertOk()->assertJsonCount(1, 'projects')->assertJsonPath('projects.0.id', $id);
     }
     public function test_midnight_refresh_updates_status_without_changing_activity_or_edit_version(): void {
         $this->install();
@@ -158,7 +183,7 @@ class CoreDefectRegressionTest extends TestCase
         $staleAccount=\App\Models\User::findOrFail(1);
         DB::table('project_editing_presence')->insert(['user_id'=>1,'editor_token'=>str_repeat('a',32),'project_id'=>$id,'session_key'=>str_repeat('b',64),'last_seen_at'=>now()]);
         $this->asUser(2);
-        $this->authenticated()->postJson('/api/auth.php',['action'=>'updateUser','id'=>1,'username'=>'fixture1','fullName'=>'Fixture 1','role'=>'staff','active'=>true,'password'=>'new-fixture-password-2026'])->assertOk();
+        $this->authenticated()->postJson('/api/auth.php',['action'=>'updateUser','id'=>1,'username'=>'fixture1','fullName'=>'Fixture 1','role'=>'staff','active'=>true,'password'=>'new-fixture-password-2026','current_password'=>'fixture-password-2026'])->assertOk();
         $this->assertDatabaseMissing('tracker_account_sessions',['user_id'=>1]);
         $this->assertDatabaseHas('tracker_account_sessions',['user_id'=>2]);
         $this->assertDatabaseCount('project_editing_presence',0);
@@ -168,7 +193,7 @@ class CoreDefectRegressionTest extends TestCase
         catch (\Illuminate\Validation\ValidationException $error) { $this->assertArrayHasKey('password',$error->errors()); }
         $this->assertDatabaseMissing('tracker_account_sessions',['user_id'=>1]);
         $this->asUser(2);
-        $this->authenticated()->postJson('/api/auth.php',['action'=>'updateUser','id'=>2,'username'=>'fixture2','fullName'=>'Fixture 2','role'=>'superadmin','active'=>true,'password'=>'new-super-fixture-password'])->assertOk()->assertJsonPath('signInRequired',true);
+        $this->authenticated()->postJson('/api/auth.php',['action'=>'updateUser','id'=>2,'username'=>'fixture2','fullName'=>'Fixture 2','role'=>'admin','active'=>true,'password'=>'new-admin-fixture-password','current_password'=>'fixture-password-2026'])->assertOk()->assertJsonPath('signInRequired',true);
         $this->api(['action'=>'saveProject','record'=>['title'=>'Old Superadmin session']])->assertUnauthorized();
     }
     public function test_deadline_status_is_current_across_list_dashboard_details_and_export_without_an_edit(): void {
@@ -191,9 +216,9 @@ class CoreDefectRegressionTest extends TestCase
     }
     public function test_numeric_validation_is_consistent_and_valid_decimals_are_preserved(): void {
         $this->install();
-        foreach(['ldAmount','ldNoOfDays','ldActualDuration','contractDuration'] as $field) {
+        foreach(['approvedBudget','bidAmount','materialTestingAmount','contractDuration'] as $field) {
             foreach(['-1','banana','NaN','Infinity','1e9',true] as $value) {
-                $row=['title'=>'Invalid numeric','approvedBudget'=>'100',$field=>$value];
+                $row=array_replace(['title'=>'Invalid numeric','approvedBudget'=>'100'],[$field=>$value]);
                 $this->api(['action'=>'saveProject','record'=>$row])->assertUnprocessable();
                 $this->stage('numeric_invalid_'.$field,[$row])->assertUnprocessable();
             }
@@ -225,7 +250,7 @@ class CoreDefectRegressionTest extends TestCase
             file_put_contents($file,$dump);
             $cfg=DB::connection()->getConfig(); $escape=fn($s)=>str_replace(['\\',':'],['\\\\','\\:'],(string)$s);
             file_put_contents($pass,implode(':',array_map($escape,[$cfg['host'],$cfg['port'],$cfg['database'],$cfg['username'],$cfg['password']])).PHP_EOL); @chmod($pass,0600);
-            $process=new Process([dirname(config('database.pg_dump')).'/'.(PHP_OS_FAMILY === 'Windows' ? 'psql.exe' : 'psql'),'--no-password','--host='.$cfg['host'],'--port='.$cfg['port'],'--username='.$cfg['username'],'--dbname='.$cfg['database'],'--set=ON_ERROR_STOP=on','--single-transaction','--file='.$file],null,['PGPASSFILE'=>$pass,'PGPASSWORD'=>false]);
+            $process=new Process([dirname(config('database.pg_dump')).'/psql.exe','--no-password','--host='.$cfg['host'],'--port='.$cfg['port'],'--username='.$cfg['username'],'--dbname='.$cfg['database'],'--set=ON_ERROR_STOP=on','--single-transaction','--file='.$file],null,['PGPASSFILE'=>$pass,'PGPASSWORD'=>false]);
             $process->mustRun();
             $this->assertDatabaseCount('projects',1); $this->assertDatabaseCount('deletion_requests',1); $this->assertDatabaseCount('deletion_request_targets',1); $this->assertDatabaseCount('import_staging_chunks',1);
             $this->assertSame('FIXTURE_DECISION',DB::table('deletion_requests')->value('decision_note'));
