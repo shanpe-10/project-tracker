@@ -40,6 +40,7 @@
             "composer install",
             "@php scripts/initialize-environment.php",
             "@php artisan migrate",
+            "@php artisan tracker:initialize-source-accounts",
             "npm ci",
             "npm run build"
         ],

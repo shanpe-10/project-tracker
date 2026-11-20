@@ -122,7 +122,7 @@ class TrackerBackupController extends Controller
             return null;
         }
         $archive = $this->createBackup($settings['destination']);
-        DB::table('audit_log')->insert(['actor_id' => null, 'actor_username' => 'system', 'action' => 'backup.automatic_created', 'entity_type' => 'backup', 'summary' => 'Created an automatic project-data backup.', 'created_at' => now()]);
+        \App\Support\TrackerAudit::record(['actor_id' => null, 'actor_username' => 'system', 'action' => 'backup.automatic_created', 'entity_type' => 'backup', 'summary' => 'Created an automatic project-data backup.', 'created_at' => now()]);
 
         return $archive;
     }
@@ -224,7 +224,7 @@ class TrackerBackupController extends Controller
                     try { TrackerMediaStore::disk()->delete([$item['key'],$item['key'].'.sha256']); } catch (\Throwable $cleanupError) { report($cleanupError); }
                 }
             }
-            if (! $manual) DB::table('audit_log')->insert(['actor_id'=>null,'actor_username'=>'system','action'=>'backup.automatic_created','entity_type'=>'backup','summary'=>'Created an automatic cloud project-data backup.','created_at'=>now()]);
+            if (! $manual) \App\Support\TrackerAudit::record(['actor_id'=>null,'actor_username'=>'system','action'=>'backup.automatic_created','entity_type'=>'backup','summary'=>'Created an automatic cloud project-data backup.','created_at'=>now()]);
             return $key;
         } finally {
             // Only this invocation's generated, isolated staging folder is removed.
@@ -446,7 +446,7 @@ class TrackerBackupController extends Controller
 
     private function audit(array $user, string $action, string $summary): void
     {
-        DB::table('audit_log')->insert(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => $action, 'entity_type' => 'backup', 'summary' => $summary, 'created_at' => now()]);
+        \App\Support\TrackerAudit::record(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => $action, 'entity_type' => 'backup', 'summary' => $summary, 'created_at' => now()]);
     }
 }
 

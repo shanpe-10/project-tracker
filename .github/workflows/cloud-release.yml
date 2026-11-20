@@ -75,11 +75,11 @@ jobs:
           curl -fsS http://localhost:10000/vendor/bootstrap/js/bootstrap.bundle.min.js >/dev/null
           curl -fsS http://localhost:10000/vendor/xlsx/xlsx.full.min.js >/dev/null
           curl -fsS -c /tmp/tracker-cookies -H 'Content-Type: application/json' \
-            -d '{"action":"login","username":"superadmin","password":"disposable-ci-owner-password"}' \
+            -d '{"action":"login","username":"admin","password":"admin9876543"}' \
             http://localhost:10000/api/auth.php > /tmp/tracker-login.json
           php -r '$p=json_decode(file_get_contents("/tmp/tracker-login.json"),true); if (empty($p["ok"])) exit(1);'
           test "$(/usr/lib/postgresql/18/bin/psql -h 127.0.0.1 -U postgres -d tracker_container_test -Atc 'SELECT count(*) FROM projects')" = 0
-          test "$(/usr/lib/postgresql/18/bin/psql -h 127.0.0.1 -U postgres -d tracker_container_test -Atc 'SELECT count(*) FROM users')" = 1
+          test "$(/usr/lib/postgresql/18/bin/psql -h 127.0.0.1 -U postgres -d tracker_container_test -Atc 'SELECT count(*) FROM users')" = 2
       - name: Container logs
         if: always()
         run: docker logs tracker-cloud 2>/dev/null || true

@@ -6,6 +6,7 @@ use App\Models\User;
 use App\Support\TrackerAccountProtection;
 use App\Support\TrackerInitialAdmin;
 use App\Support\TrackerPassword;
+use App\Support\TrackerAudit;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -41,6 +42,7 @@ class TrackerAuthController extends Controller
             return response()->json(['ok' => false, 'message' => 'The security token is invalid.'], 419);
         }
         if ($action === 'logout') {
+            $this->audit($current, 'account.signed_out', 'account', $current['id'], 'Signed out of Project Tracker.');
             TrackerProjectPresenceController::endSession($request);
             \App\Support\TrackerSession::end($request);
             $request->session()->invalidate();
@@ -53,6 +55,12 @@ class TrackerAuthController extends Controller
             \App\Support\TrackerSession::activity($request, $account);
             return response()->json(['ok' => true, 'sessionTiming' => \App\Support\TrackerSession::timing($request, $account)]);
         }
+        if ($current['role'] === 'superadmin') {
+            if ($action === 'listAuditLog') return $this->listAuditLog($request);
+            if ($action === 'getAuditLogEntry') return $this->auditLogEntry($request);
+            return response()->json(['ok' => false, 'message' => 'This account has read-only accountability access.'], 403);
+        }
+        if ($action === 'getAuditLogEntry') return response()->json(['ok' => false, 'message' => 'Detailed audit access is restricted.'], 403);
         if ($current['role'] !== 'admin') {
             return response()->json(['ok' => false, 'message' => 'Only Admin can manage accounts and recent activity.'], 403);
         }
@@ -97,6 +105,7 @@ class TrackerAuthController extends Controller
         $csrf = Str::random(64);
         $request->session()->put(['tracker_user' => $user, 'tracker_csrf' => $csrf, 'tracker_created_at' => time(), 'tracker_last_activity' => time()]);
         \App\Support\TrackerSession::start($request, $account);
+        $this->audit($user, 'account.signed_in', 'account', $account->id, 'Signed in to Project Tracker.');
 
         return response()->json(['ok' => true, 'user' => $user, 'csrfToken' => $csrf, 'sessionTiming' => \App\Support\TrackerSession::timing($request, $account)]);
     }
@@ -188,6 +197,7 @@ class TrackerAuthController extends Controller
             $originalAdminId = TrackerAccountProtection::originalAdminId();
             $retiredId = TrackerAccountProtection::retiredLegacyAdminId();
             $users = User::query()
+                ->whereIn('role', ['admin', 'staff'])
                 ->when($retiredId !== null, fn ($query) => $query->whereKeyNot($retiredId))
                 ->orderBy('role')->orderBy('active')->orderBy('created_at')->get()
                 ->map(fn (User $u) => $this->userPayload($u) + ['isOriginalAdmin' => (int) $u->id === $originalAdminId, 'active' => (bool) $u->active, 'createdAt' => \Carbon\CarbonImmutable::parse($u->created_at, 'UTC')->toIso8601String()]);
@@ -216,7 +226,7 @@ class TrackerAuthController extends Controller
         }
         $id = (int) $request->input('id');
         $target = User::find($id);
-        if (! $target || $id === TrackerAccountProtection::retiredLegacyAdminId()) {
+        if (! $target || $target->role === 'superadmin' || $id === TrackerAccountProtection::retiredLegacyAdminId()) {
             return response()->json(['ok' => false, 'message' => 'The account was not found.'], 404);
         }
         if ((int) $target->id === $originalAdminId && in_array($action, ['rejectUser','deleteUser'], true)) {
@@ -229,6 +239,7 @@ class TrackerAuthController extends Controller
             && User::where('role','admin')->where('active',true)->count() <= 1) {
             return response()->json(['ok'=>false,'message'=>'Keep at least one active Admin account.'],422);
         }
+        $before = $this->accountEvidence($target);
         if ($action === 'approveUser') {
             $target->active = true;
             $target->save();
@@ -246,7 +257,8 @@ class TrackerAuthController extends Controller
         } else {
             return response()->json(['ok' => false, 'message' => 'Unsupported authentication request.'], 400);
         }
-        $this->audit($current, 'account.'.$action, 'account', $id, 'Managed account '.$target->username.'.');
+        $this->audit($current, 'account.'.$action, 'account', $id, 'Managed account '.$target->username.'.',
+            ['before' => $before, 'after' => in_array($action, ['rejectUser', 'deleteUser'], true) ? [] : $this->accountEvidence($target)]);
 
         return response()->json(['ok' => true, 'message' => 'Account updated.']);
     }
@@ -265,6 +277,9 @@ class TrackerAuthController extends Controller
             'password'=>[$creating ? 'required' : 'nullable','string','min:12',\App\Support\TrackerPassword::rule()],
             'current_password'=>[$resetting ? 'required' : 'nullable','string','max:4096'],
         ], ['current_password.required' => 'Enter your own Admin password to continue.']);
+        if (strcasecmp(trim($data['username']), 'superadmin') === 0) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['username' => 'This username is unavailable.']);
+        }
         return DB::transaction(function () use ($data,$creating,$current,$resetting) {
             // Serialize account changes, including the last-Admin guard.
             $accounts = User::orderBy('id')->lockForUpdate()->get();
@@ -273,7 +288,7 @@ class TrackerAuthController extends Controller
                 return response()->json(['ok' => false, 'message' => 'Admin access is required.'], 403);
             }
             $target = $creating ? new User() : User::find($data['id']);
-            if (! $target || (! $creating && (int) $target->id === TrackerAccountProtection::retiredLegacyAdminId())) {
+            if (! $target || $target->role === 'superadmin' || (! $creating && (int) $target->id === TrackerAccountProtection::retiredLegacyAdminId())) {
                 return response()->json(['ok'=>false,'message'=>'Account not found.'],404);
             }
             if (User::where('username',$data['username'])->when(! $creating,fn ($q)=>$q->where('id','<>',$target->id))->exists()) {
@@ -289,6 +304,7 @@ class TrackerAuthController extends Controller
             if ($resetting && ($failure = $this->confirmAdminPassword($actor, $data['current_password']))) {
                 return $failure;
             }
+            $before = $creating ? [] : $this->accountEvidence($target);
             $target->fill(['username'=>trim($data['username']),'full_name'=>trim($data['fullName']),'role'=>$data['role'],'active'=>$data['active']]);
             if (! empty($data['password'])) {
                 $target->password_hash = Hash::make($data['password']);
@@ -299,7 +315,8 @@ class TrackerAuthController extends Controller
                 DB::table('tracker_account_sessions')->where('user_id', $target->id)->delete();
                 DB::table('project_editing_presence')->where('user_id', $target->id)->delete();
             }
-            $this->audit($current,$creating ? 'account.created' : 'account.updated','account',$target->id,'Managed account '.$target->username.'.');
+            $this->audit($current,$creating ? 'account.created' : 'account.updated','account',$target->id,'Managed account '.$target->username.'.',
+                ['before' => $before, 'after' => $this->accountEvidence($target), 'credentialReset' => $resetting]);
             return response()->json(['ok'=>true,'message'=>$creating ? 'Account created.' : 'Account updated.', 'signInRequired' => $resetting && (int)$target->id === (int)$current['id']]);
         });
     }
@@ -307,6 +324,12 @@ class TrackerAuthController extends Controller
     private function userPayload(User $u): array
     {
         return ['id' => (int) $u->id, 'username' => $u->username, 'fullName' => $u->full_name, 'profilePhoto' => $u->profile_photo ? 'api/profile.php?action=photo&userId='.(int) $u->id.'&v='.rawurlencode((string) ($u->profile_photo_updated_at ?? '')) : null, 'role' => $u->role, ...\App\Support\TrackerAccess::capabilities($u)];
+    }
+
+    private function accountEvidence(User $user): array
+    {
+        return $user->only(['username', 'full_name', 'role', 'active', 'can_create', 'can_edit', 'can_import',
+            'can_export', 'can_delete', 'can_delete_all', 'can_resolve_alerts', 'can_archive']);
     }
 
     private function currentSessionUser(Request $request): ?array
@@ -347,6 +370,9 @@ class TrackerAuthController extends Controller
             'fromDate' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:0001-01-01'],
             'toDate' => ['nullable', 'date_format:Y-m-d', 'after_or_equal:0001-01-01'],
             'page' => ['sometimes', 'integer', 'min:1'],
+            'actor' => ['nullable', 'string', 'max:80'],
+            'actionFilter' => ['nullable', 'string', 'max:80'],
+            'search' => ['nullable', 'string', 'max:200'],
         ]);
         $from = $filters['fromDate'] ?? null;
         $to = $filters['toDate'] ?? null;
@@ -355,14 +381,30 @@ class TrackerAuthController extends Controller
         }
 
         $cutoff = json_decode((string) (DB::table('application_settings')->where('setting_key', 'audit_visible_after')->value('setting_value') ?: 'null'), true) ?: '1970-01-01 00:00:00';
-        $query = DB::table('audit_log')->where('created_at', '>=', $cutoff);
+        $auditor = $request->session()->get('tracker_user.role') === 'superadmin';
+        $query = DB::table('audit_log');
+        if (!$auditor) {
+            $query->where('created_at', '>=', $cutoff)
+                ->where(fn($q) => $q->whereNull('actor_id')->orWhereNotIn('actor_id', User::where('role', 'superadmin')->select('id')));
+            if (\Illuminate\Support\Facades\Schema::hasColumn('audit_log', 'metadata')) {
+                $query->where(fn($q) => $q->whereNull('metadata')->orWhereRaw("COALESCE(metadata->>'visibility','') <> 'superadmin'"));
+            }
+        }
+        foreach (['actor' => 'actor_username', 'actionFilter' => 'action'] as $filter => $column) {
+            if ($value = trim((string)($filters[$filter] ?? ''))) $query->whereRaw("LOWER($column) LIKE ?", ['%'.mb_strtolower($value).'%']);
+        }
+        if ($value = trim((string)($filters['search'] ?? ''))) {
+            $query->where(fn($q) => $q->whereRaw('LOWER(summary) LIKE ?', ['%'.mb_strtolower($value).'%'])
+                ->orWhereRaw('LOWER(actor_username) LIKE ?', ['%'.mb_strtolower($value).'%'])
+                ->orWhereRaw('LOWER(action) LIKE ?', ['%'.mb_strtolower($value).'%']));
+        }
         if ($from) {
             $query->where('created_at', '>=', CarbonImmutable::createFromFormat('!Y-m-d', $from, 'Asia/Manila')->utc());
         }
         if ($to) {
             $query->where('created_at', '<', CarbonImmutable::createFromFormat('!Y-m-d', $to, 'Asia/Manila')->addDay()->utc());
         }
-        $page = $query->orderByDesc('id')->simplePaginate(100, ['*'], 'page', (int) ($filters['page'] ?? 1));
+        $page = $query->orderByDesc('id')->simplePaginate(100, ['id','actor_username','action','entity_type','entity_id','summary','created_at'], 'page', (int) ($filters['page'] ?? 1));
         $entries = $page->getCollection()->map(fn ($entry) => [
             'id' => (int) $entry->id,
             'actorUsername' => $entry->actor_username,
@@ -374,11 +416,24 @@ class TrackerAuthController extends Controller
         ]);
 
         return response()->json(['ok' => true, 'entries' => $entries, 'page' => $page->currentPage(),
-            'hasMorePages' => $page->hasMorePages()]);
+            'hasMorePages' => $page->hasMorePages(), 'readOnly' => $auditor])->header('Cache-Control', 'private, no-store');
     }
 
-    private function audit(array $user, string $action, string $type, ?int $id, string $summary): void
+    private function auditLogEntry(Request $request): JsonResponse
     {
-        DB::table('audit_log')->insert(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => $action, 'entity_type' => $type, 'entity_id' => $id, 'summary' => $summary, 'created_at' => now()]);
+        $request->validate(['id' => ['required', 'integer', 'min:1']]);
+        $entry = DB::table('audit_log')->where('id', $request->integer('id'))->first();
+        if (!$entry) return response()->json(['ok' => false, 'message' => 'Log entry not found.'], 404);
+        return response()->json(['ok' => true, 'entry' => [
+            'id' => (int)$entry->id, 'actorUsername' => $entry->actor_username,
+            'action' => $entry->action, 'entityType' => $entry->entity_type, 'entityId' => $entry->entity_id,
+            'summary' => $entry->summary, 'createdAt' => CarbonImmutable::parse($entry->created_at, 'UTC')->toIso8601String(),
+            'metadata' => TrackerAudit::clean(TrackerAudit::decode($entry->metadata ?? null)),
+        ]])->header('Cache-Control', 'private, no-store');
+    }
+
+    private function audit(array $user, string $action, string $type, ?int $id, string $summary, array $evidence = []): void
+    {
+        TrackerAudit::record(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => $action, 'entity_type' => $type, 'entity_id' => $id, 'summary' => $summary, 'created_at' => now()], $evidence);
     }
 }

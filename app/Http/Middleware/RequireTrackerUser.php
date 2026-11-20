@@ -49,6 +49,7 @@ class RequireTrackerUser
             }
         }
 
+        if ($account->role === 'superadmin' && $request->is('accountability')) return $next($request);
         if (! in_array($account->role, ['admin', 'staff'], true)) {
             return response()->json(['ok' => false, 'message' => 'Project Tracker access requires an Admin or Staff account.'], 403);
         }

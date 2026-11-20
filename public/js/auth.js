@@ -158,6 +158,7 @@ async function signIn(event) {
             }
             return;
         }
+        if (result.user.role === "superadmin") { window.location.assign("accountability"); return; }
         applyAuthenticatedUser(result.user, result.csrfToken, result.sessionTiming);
         passwordField.value = "";
         setupFields.forEach(input => { input.value = ""; input.required = false; });
@@ -310,6 +311,7 @@ async function renderEditedProfilePhoto() {
 document.addEventListener("DOMContentLoaded", async () => {
     try {
         const result = await authRequest("session");
+        if (result.authenticated && result.user?.role === "superadmin") { window.location.replace("accountability"); return; }
         if (result.ok && result.authenticated) { applyAuthenticatedUser(result.user, result.csrfToken, result.sessionTiming); await initializeDatabase(); }
         else showLogin(result.message || "");
     } catch (_) { showLogin(connectionHelpMessage()); }

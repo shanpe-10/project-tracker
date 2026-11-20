@@ -349,7 +349,7 @@ class TrackerDeletionController extends Controller
             DB::table('deletion_request_targets')->where('request_id', $row->id)->update(['active_key' => null]);
             $this->audit($user, 'deletion.confirmed', $row->id, ['targetType' => $row->target_type, 'targetIds' => $ids]);
             foreach ($ids as $id) {
-                DB::table('audit_log')->insert(['actor_id' => $user['id'], 'actor_username' => $user['username'],
+                \App\Support\TrackerAudit::record(['actor_id' => $user['id'], 'actor_username' => $user['username'],
                     'action' => $row->target_type === 'project' ? 'project.deleted' : 'history.deleted', 'entity_type' => $row->target_type,
                     'entity_id' => $id, 'summary' => 'Deleted after two-step admin approval (request #'.$row->id.').',
                     'metadata' => json_encode(['deletionRequestId' => $row->id]), 'created_at' => now('UTC')]);
@@ -487,12 +487,12 @@ class TrackerDeletionController extends Controller
             } else DB::table('history')->whereIn('id', $ids)->delete();
             foreach ($rows as $row) {
                 $snapshot = json_decode($row->data, true) ?: [];
-                DB::table('audit_log')->insert(['actor_id' => $user['id'], 'actor_username' => $user['username'],
+                \App\Support\TrackerAudit::record(['actor_id' => $user['id'], 'actor_username' => $user['username'],
                     'action' => $type === 'project' ? 'project.deleted' : 'history.deleted', 'entity_type' => $type,
                     'entity_id' => $row->id, 'summary' => 'Deleted directly by Admin after review and final confirmation.',
                     'metadata' => json_encode(['actor' => TrackerHistory::actor($user), 'method' => 'admin_direct_two_step',
                         'reason' => $prepared['reason'], 'reviewedAt' => $prepared['reviewedAt'], 'confirmedAt' => now('UTC')->toIso8601String(),
-                        'title' => $snapshot['title'] ?? $snapshot['action'] ?? '', 'projectNo' => $snapshot['projectNo'] ?? null]), 'created_at' => now('UTC')]);
+                        'before' => $snapshot, 'after' => [], 'title' => $snapshot['title'] ?? $snapshot['action'] ?? '', 'projectNo' => $snapshot['projectNo'] ?? null]), 'created_at' => now('UTC')]);
             }
             return $type === 'project' ? $rows : collect();
         }, 3);
@@ -503,7 +503,7 @@ class TrackerDeletionController extends Controller
 
     private function audit(array $user, string $action, ?int $id, array $metadata): void
     {
-        DB::table('audit_log')->insert(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => $action,
+        \App\Support\TrackerAudit::record(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => $action,
             'entity_type' => 'deletion_request', 'entity_id' => $id, 'summary' => Str::limit(str_replace('.', ' ', $action).($id !== null ? ' #'.$id : ''), 500),
             'metadata' => json_encode(['actor' => TrackerHistory::actor($user)] + $metadata), 'created_at' => now('UTC')]);
     }

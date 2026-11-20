@@ -554,7 +554,7 @@ class TrackerDataController extends Controller
         if ($project && $request->input('action') !== 'saveTimelineRecord') {
             TrackerHistory::append($id, $before ?? [], $record, $user, isset($before) ? 'Edited' : 'Created');
         }
-        $this->audit($user, $project ? 'project.saved' : 'history.saved', $project ? 'project' : 'history', $id, $project ? 'Saved project: '.($record['title'] ?? '') : 'Saved project history entry.');
+        $this->audit($user, $project ? 'project.saved' : 'history.saved', $project ? 'project' : 'history', $id, $project ? 'Saved project: '.($record['title'] ?? '') : 'Saved project history entry.', $project ? ['before' => $before ?? [], 'after' => $record] : ['after' => $record]);
         $record['id'] = $id;
 
         return response()->json(['ok' => true, 'record' => $record]);
@@ -626,7 +626,7 @@ class TrackerDataController extends Controller
             DB::table('projects')->where('id', $id)->update(['data' => json_encode($record, JSON_UNESCAPED_UNICODE), 'archived_at' => $archived ? now() : null, 'updated_by' => $user['id'], 'updated_at' => now()]);
             $history = ['projectId' => $id, 'editedAt' => now('UTC')->format('Y-m-d\TH:i:s.u\Z'), 'changes' => json_encode($before, JSON_UNESCAPED_UNICODE), 'action' => $archived ? 'Archived' : 'Restored', 'updatedBy' => $user['username'], 'actor' => TrackerHistory::actor($user)];
             DB::table('history')->insert(['data' => json_encode($history, JSON_UNESCAPED_UNICODE), 'project_id' => $id, 'event_at' => now(), 'updated_by' => $user['id'], 'updated_at' => now()]);
-            $this->audit($user, $archived ? 'project.archived' : 'project.restored', 'project', $id, $archived ? 'Archived project.' : 'Restored project.');
+            $this->audit($user, $archived ? 'project.archived' : 'project.restored', 'project', $id, $archived ? 'Archived project.' : 'Restored project.', ['before' => ['archived' => !$archived], 'after' => ['archived' => $archived]]);
 
             return $record;
         });
@@ -657,6 +657,7 @@ class TrackerDataController extends Controller
             } $valid[$key] = $value;
         }
         DB::table('application_settings')->updateOrInsert(['setting_key' => 'timeline_days'], ['setting_value' => json_encode($valid), 'updated_by' => $user['id'], 'updated_at' => now()]);
+        $this->audit($user, 'settings.timeline_updated', 'settings', null, 'Updated timeline reminders.', ['before' => $current, 'after' => $valid]);
 
         return response()->json(['ok' => true, 'settings' => $valid]);
     }
@@ -1068,8 +1069,8 @@ class TrackerDataController extends Controller
         return (array) $request->session()->get('tracker_user');
     }
 
-    private function audit(array $user, string $action, string $type, ?int $id, string $summary): void
+    private function audit(array $user, string $action, string $type, ?int $id, string $summary, array $evidence = []): void
     {
-        DB::table('audit_log')->insert(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => $action, 'entity_type' => $type, 'entity_id' => $id, 'summary' => $summary, 'created_at' => now()]);
+        \App\Support\TrackerAudit::record(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => $action, 'entity_type' => $type, 'entity_id' => $id, 'summary' => $summary, 'created_at' => now()], $evidence);
     }
 }

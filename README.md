@@ -25,7 +25,7 @@ and optional Vite asset work.
 2. Run `composer install` and copy `.env.example` to `.env`.
 3. Fill the development database connection in `.env`, then run
    `php scripts/initialize-environment.php` to generate this copy's encryption key.
-4. Run `php artisan migrate` and `php artisan tracker:create-admin`.
+4. Run `php artisan migrate` and `php artisan tracker:initialize-source-accounts`.
 5. Run `php artisan serve` and open the address it prints.
 
 Use a separate development database and media folders for this copy. Do not copy
@@ -44,11 +44,21 @@ PostgreSQL connection, and private S3 storage settings. Values belong in Render'
 private environment, using `.env.render.example` as the list of required keys.
 Never generate a replacement key for the existing hosted application.
 
-The current app uses Admin and Staff roles. The role migration preserves existing
-usernames and password hashes while converting the retired Superadmin role to
-Admin. A new empty cloud database can create its first Admin from private
-TRACKER_BOOTSTRAP_NAME, TRACKER_BOOTSTRAP_USERNAME, and TRACKER_BOOTSTRAP_PASSWORD
-settings. Existing accounts are never recreated by that startup command.
+Normal account management uses Admin and Staff roles. The source edition also
+has a restricted Superadmin account that opens the read-only Accountability
+page. This role is hidden from the normal account directory, cannot be assigned
+there, and cannot manage accounts or change project data.
+
+The source setup command initializes the reserved `admin` and `superadmin`
+accounts once, using the requested initial credentials. On an existing database,
+this changes those two reserved accounts and preserves other accounts and
+project records. The initialization marker prevents later deployments from
+resetting passwords. Docker startup runs this command after database migrations.
+
+Accountability records include the actor, action, time, affected record,
+field changes where available, and request context. Credentials are excluded.
+Older entries show only the evidence originally recorded. Clearing the ordinary
+Admin log view does not hide preserved entries from Superadmin.
 
 Attachments, profile photos, holiday settings and cloud project backups retain
 the existing persistent storage integrations. Download the latest project backup

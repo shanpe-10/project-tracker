@@ -2055,7 +2055,7 @@ ADD / EDIT PROJECT
     </div>
     @include('deletion-requests')
     <script src="js/deletion-requests.js?v=20261118-deletion-password"></script>
-    <script src="js/auth.js?v=20261118-admin-delete-all"></script>
+    <script src="js/auth.js?v=20261120-accountability-20261118-admin-delete-all"></script>
     <script src="js/session.js?v=20261111-admin-roles"></script>
 
     <script src="js/admin.js?v=20261118-log-numbers"></script>

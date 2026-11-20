@@ -95,7 +95,7 @@ class TrackerMediaController extends Controller
                 $record['updatedAt'] = now('UTC')->format('Y-m-d\TH:i:s.u\Z');
                 DB::table('projects')->where('id', $projectId)->update(['data' => json_encode($record, JSON_UNESCAPED_UNICODE)] + TrackerDataController::projectColumns($record) + ['updated_by' => $user['id'], 'updated_at' => now()]);
                 TrackerHistory::append($projectId, $before, $record, $user, 'Edited');
-                DB::table('audit_log')->insert(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => 'project.saved', 'entity_type' => 'project', 'entity_id' => $projectId, 'summary' => 'Saved project: '.$record['title'], 'created_at' => now()]);
+                \App\Support\TrackerAudit::record(['actor_id' => $user['id'], 'actor_username' => $user['username'], 'action' => 'project.saved', 'entity_type' => 'project', 'entity_id' => $projectId, 'summary' => 'Saved project: '.$record['title'], 'created_at' => now()], ['before' => $before, 'after' => $record]);
 
                 return $record;
             });

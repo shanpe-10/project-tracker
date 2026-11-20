@@ -8,6 +8,10 @@ use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'tracker');
 Route::post('/api/auth.php', [TrackerAuthController::class, 'handle']);
+Route::get('/accountability', function (\Illuminate\Http\Request $request) {
+    abort_unless($request->session()->get('tracker_user.role') === 'superadmin', 403);
+    return response()->view('tracker-accountability')->header('Cache-Control', 'private, no-store');
+})->middleware('tracker.auth');
 Route::middleware('tracker.auth')->group(function () {
     Route::match(['get', 'post'], '/api/deletion-requests.php', [\App\Http\Controllers\TrackerDeletionController::class, 'handle']);
     Route::match(['get', 'post'], '/api/holidays.php', [\App\Http\Controllers\TrackerHolidayController::class, 'handle']);
