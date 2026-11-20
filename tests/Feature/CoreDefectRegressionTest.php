@@ -250,7 +250,7 @@ class CoreDefectRegressionTest extends TestCase
             file_put_contents($file,$dump);
             $cfg=DB::connection()->getConfig(); $escape=fn($s)=>str_replace(['\\',':'],['\\\\','\\:'],(string)$s);
             file_put_contents($pass,implode(':',array_map($escape,[$cfg['host'],$cfg['port'],$cfg['database'],$cfg['username'],$cfg['password']])).PHP_EOL); @chmod($pass,0600);
-            $process=new Process([dirname(config('database.pg_dump')).'/psql.exe','--no-password','--host='.$cfg['host'],'--port='.$cfg['port'],'--username='.$cfg['username'],'--dbname='.$cfg['database'],'--set=ON_ERROR_STOP=on','--single-transaction','--file='.$file],null,['PGPASSFILE'=>$pass,'PGPASSWORD'=>false]);
+            $process=new Process([dirname(config('database.pg_dump')).'/psql'.(PHP_OS_FAMILY === 'Windows' ? '.exe' : ''),'--no-password','--host='.$cfg['host'],'--port='.$cfg['port'],'--username='.$cfg['username'],'--dbname='.$cfg['database'],'--set=ON_ERROR_STOP=on','--single-transaction','--file='.$file],null,['PGPASSFILE'=>$pass,'PGPASSWORD'=>false]);
             $process->mustRun();
             $this->assertDatabaseCount('projects',1); $this->assertDatabaseCount('deletion_requests',1); $this->assertDatabaseCount('deletion_request_targets',1); $this->assertDatabaseCount('import_staging_chunks',1);
             $this->assertSame('FIXTURE_DECISION',DB::table('deletion_requests')->value('decision_note'));
