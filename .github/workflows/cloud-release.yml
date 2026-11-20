@@ -1,7 +1,7 @@
 name: Cloud release checks
 on:
   push:
-    branches: [laoag-city-ceo-project-tracker]
+    branches: [main, laoag-city-ceo-project-tracker]
   workflow_dispatch:
 permissions:
   contents: read
