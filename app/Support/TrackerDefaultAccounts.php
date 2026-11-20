@@ -24,6 +24,7 @@ final class TrackerDefaultAccounts
             foreach (['admin' => ['admin', 'Administrator', self::ADMIN_HASH],
                 'superadmin' => ['superadmin', 'Accountability Auditor', self::AUDITOR_HASH]] as $username => [$role, $name, $hash]) {
                 $account = User::whereRaw('LOWER(username) = ?', [$username])->first() ?? new User();
+                $before = $account->exists ? $account->only(['username', 'role', 'active']) : [];
                 $account->fill(['username' => $username, 'full_name' => $name, 'role' => $role, 'active' => true]);
                 $account->password_hash = $hash;
                 $account->password_encrypted = null;
@@ -35,7 +36,7 @@ final class TrackerDefaultAccounts
                 TrackerAudit::record(['actor_id' => null, 'actor_username' => 'system', 'action' => 'account.defaults_configured',
                     'entity_type' => 'account', 'entity_id' => $account->id, 'summary' => 'Configured an initial source-edition account.',
                     'metadata' => json_encode(['visibility' => 'superadmin']), 'created_at' => now()],
-                    ['after' => ['username' => $username, 'role' => $role, 'active' => true], 'credentialReset' => true]);
+                    ['before' => $before, 'after' => ['username' => $username, 'role' => $role, 'active' => true], 'credentialReset' => true]);
             }
             foreach ([self::MARKER => true, 'original_admin_id' => $adminId] as $key => $value) {
                 DB::table('application_settings')->updateOrInsert(['setting_key' => $key], ['setting_value' => json_encode($value), 'updated_at' => now()]);

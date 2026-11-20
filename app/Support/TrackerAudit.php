@@ -55,7 +55,8 @@ final class TrackerAudit
                 'request' => request()->only(['action', 'settings', 'enabled', 'destination', 'reason', 'note', 'batchId',
                     'targetType', 'id', 'permission', 'allowed', 'active', 'fullName', 'role', 'username', 'archive'])];
         }
-        $metadata['audit'] = ['actor' => $identity, 'target' => $target, 'changes' => $changes, 'context' => self::clean($context)];
+        $metadata['audit'] = ['actor' => $identity, 'target' => $target, 'beforeCaptured' => array_key_exists('before', $evidence),
+            'changes' => $changes, 'context' => self::clean($context)];
         if ($actor?->role === 'superadmin') $metadata['visibility'] = 'superadmin';
         $row['metadata'] = json_encode(self::clean($metadata), JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
         DB::table('audit_log')->insert($row);

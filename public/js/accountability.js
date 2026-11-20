@@ -46,7 +46,8 @@
             const body = node("tbody");
             for (const change of changes) {
                 const row = node("tr");
-                row.append(node("td", change.label || change.field), node("td", valueText(change.before)), node("td", valueText(change.after)));
+                const previous = change.before === null && audit.beforeCaptured !== true ? "Not recorded" : valueText(change.before);
+                row.append(node("td", change.label || change.field), node("td", previous), node("td", valueText(change.after)));
                 body.append(row);
             }
             table.append(body); wrapper.append(table); container.append(wrapper);

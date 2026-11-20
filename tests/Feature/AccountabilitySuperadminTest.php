@@ -70,6 +70,12 @@ final class AccountabilitySuperadminTest extends TestCase
         DB::table('projects')->insert(['data' => '{"title":"Retained"}']);
         TrackerDefaultAccounts::initialize();
         $this->assertDatabaseHas('users', ['id' => 3, 'username' => 'superadmin', 'role' => 'superadmin']);
+        $configured = DB::table('audit_log')->where('action', 'account.defaults_configured')->where('entity_id', 3)->first();
+        $audit = json_decode($configured->metadata, true)['audit'];
+        $roleChange = collect($audit['changes'])->firstWhere('field', 'role');
+        $this->assertTrue($audit['beforeCaptured']);
+        $this->assertSame('admin', $roleChange['before']);
+        $this->assertSame('superadmin', $roleChange['after']);
         $this->assertSame($password, DB::table('users')->where('id', 2)->value('password_hash'));
         $this->assertDatabaseHas('users', ['id' => 1, 'username' => 'manager', 'role' => 'admin']);
         $this->assertDatabaseCount('projects', 1);

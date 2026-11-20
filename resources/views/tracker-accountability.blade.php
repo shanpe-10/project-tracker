@@ -32,6 +32,6 @@
         </section>
         <p class="audit-footnote">Log numbers stay with their entries. Activity hidden from the Admin view is retained here. Older entries show the details recorded at the time.</p>
     </main>
-    <script src="{{ asset('js/accountability.js') }}?v=20261120" defer></script>
+    <script src="{{ asset('js/accountability.js') }}?v=20261120b" defer></script>
 </body>
 </html>
